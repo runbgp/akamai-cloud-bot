@@ -127,4 +127,22 @@ class Database:
                 self._write_db(db)
                 return True
         
-        return False 
+        return False
+    
+    def get_all_instances(self) -> List[tuple]:
+        """
+        Get all Akamai Cloud instances from all users.
+        
+        Returns:
+            List of tuples containing (user_id, instance_id)
+        """
+        db = self._read_db()
+        all_instances = []
+        
+        for user_id, instances in db.items():
+            for instance in instances:
+                instance_id = instance.get("id")
+                if instance_id:
+                    all_instances.append((user_id, instance_id))
+        
+        return all_instances

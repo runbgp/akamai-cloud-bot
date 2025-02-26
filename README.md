@@ -8,6 +8,7 @@ A Discord bot that allows users to create, check the status of, and delete Akama
 - Check the status of your Akamai Cloud instances
 - Delete your Akamai Cloud instances
 - User-specific instance tracking
+- Automatic instance status refresh every minute
 
 ## Setup
 
@@ -29,17 +30,6 @@ A Discord bot that allows users to create, check the status of, and delete Akama
 ## Commands
 
 - `/create-instance` - Create a new Akamai Cloud instance
-- `/list-instances` - List your Akamai Cloud instances
+- `/list-instances` - List your Akamai Cloud instances (auto-refreshed every minute)
 - `/delete-instance` - Delete an Akamai Cloud instance
-- `/refresh-instance` - Refresh an Akamai Cloud instance's status
 - `/reboot-instance` - Reboot an Akamai Cloud instance
-
-### Legacy Commands (Aliases)
-
-The following commands are maintained for backward compatibility:
-
-- `/create-linode` - Alias for `/create-instance`
-- `/list-linodes` - Alias for `/list-instances`
-- `/delete-linode` - Alias for `/delete-instance`
-- `/refresh-linode` - Alias for `/refresh-instance`
-- `/reboot-linode` - Alias for `/reboot-instance`

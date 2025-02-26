@@ -1,12 +1,13 @@
 import os
 import discord
 from discord import app_commands
-from discord.ext import commands
+from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import asyncio
 import random
 import string
 from typing import Dict, List, Optional, Any
+import datetime
 
 from akamai_api import AkamaiCloudAPI
 from database import Database
@@ -51,6 +52,11 @@ async def on_ready():
     
     # Cache Akamai Cloud data
     await update_cache()
+    
+    # Start background tasks
+    if not auto_refresh_instances.is_running():
+        auto_refresh_instances.start()
+        print("Started automatic instance refresh task")
 
 async def update_cache():
     """Update the cache with Akamai Cloud data."""
@@ -62,10 +68,61 @@ async def update_cache():
     except Exception as e:
         print(f"Failed to update cache: {e}")
 
+@tasks.loop(minutes=1)
+async def auto_refresh_instances():
+    """Background task to automatically refresh all instances every minute."""
+    try:
+        # Get all instances from the database
+        all_instances = db.get_all_instances()
+        
+        if not all_instances:
+            return
+            
+        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refreshing {len(all_instances)} instances...")
+        
+        # Refresh each instance
+        for user_id, instance_id in all_instances:
+            try:
+                # Get the latest instance data
+                updated_instance = akamai_api.get_instance(instance_id)
+                
+                # Update the database
+                db.update_instance(user_id, instance_id, updated_instance)
+            except Exception as e:
+                print(f"Failed to refresh instance {instance_id} for user {user_id}: {e}")
+                
+        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refresh completed")
+    except Exception as e:
+        print(f"Error in auto_refresh_instances task: {e}")
+
+@auto_refresh_instances.before_loop
+async def before_auto_refresh():
+    """Wait until the bot is ready before starting the auto-refresh task."""
+    await bot.wait_until_ready()
+
 def generate_password(length=16):
     """Generate a secure random password."""
     chars = string.ascii_letters + string.digits + "!@#$%^&*()_-+=<>?"
     return ''.join(random.choice(chars) for _ in range(length))
+
+def get_country_flag(country_code):
+    """Convert a country code to a flag emoji."""
+    # Country codes are 2-letter ISO codes
+    # To make a flag emoji, convert each letter to a regional indicator symbol emoji
+    # Regional indicator symbols are Unicode characters U+1F1E6 to U+1F1FF (A-Z)
+    if not country_code or len(country_code) != 2:
+        return "🌐"  # Globe emoji as fallback
+    
+    # Convert to uppercase
+    country_code = country_code.upper()
+    
+    # Convert each letter to the corresponding regional indicator symbol
+    # by adding the Unicode offset
+    first_letter = ord(country_code[0]) - ord('A') + ord('🇦')
+    second_letter = ord(country_code[1]) - ord('A') + ord('🇦')
+    
+    # Return the flag emoji
+    return chr(first_letter) + chr(second_letter)
 
 class RegionSelect(discord.ui.Select):
     """Dropdown for selecting an Akamai Cloud region."""
@@ -79,8 +136,8 @@ class RegionSelect(discord.ui.Select):
             
         # Define priority regions (common US, EU, and Asia regions)
         priority_regions = [
-            "us-east", "us-central", "us-west", "us-southeast", "us-iad",
-            "eu-west", "eu-central", "ap-northeast", "ap-southeast", "ap-south"
+            "us-iad", "us-ord", "us-sea", "us-lax", "us-mia",
+            "gb-lon", "de-fra-2", "se-sto", "nl-ams", "fr-par"
         ]
         
         # Sort regions by priority
@@ -98,13 +155,23 @@ class RegionSelect(discord.ui.Select):
                 sorted_regions.append(region)
         
         # Create options from our sorted list
-        options = [
-            discord.SelectOption(
-                label=region.get("id", "unknown"),
-                description=region.get("country", "")
+        options = []
+        for region in sorted_regions[:25]:  # Discord limits to 25 options
+            region_id = region.get("id", "unknown")
+            region_label = region.get("label", "Unknown")
+            country_code = region.get("country", "")
+            
+            # Get flag emoji based on country code
+            flag_emoji = get_country_flag(country_code)
+            
+            # Create the option with flag emoji and both ID and label
+            options.append(
+                discord.SelectOption(
+                    label=f"{flag_emoji} {region_id}",
+                    description=region_label,
+                    value=region_id
+                )
             )
-            for region in sorted_regions[:25]  # Discord limits to 25 options
-        ]
         
         # If no valid options were created, provide a default
         if not options:
@@ -324,11 +391,18 @@ class InstanceCreationView(discord.ui.View):
                 
                 ipv6_text = f"`{ipv6_address}`" if ipv6_address else "None assigned yet"
                 
+                # Get region details
+                region_id = instance.get('region', 'Unknown')
+                region_info = next((r for r in cache["regions"] if r.get("id") == region_id), None)
+                region_label = region_info.get("label", "Unknown") if region_info else "Unknown"
+                country_code = region_info.get("country", "") if region_info else ""
+                flag_emoji = get_country_flag(country_code)
+                
                 await dm_channel.send(
                     f"**Your Akamai Cloud instance has been created!**\n\n"
                     f"**Instance ID:** `{instance['id']}`\n"
                     f"**Label:** `{instance['label']}`\n"
-                    f"**Region:** `{instance['region']}`\n"
+                    f"**Region:** {flag_emoji} `{region_id}` ({region_label})\n"
                     f"**Image:** `{instance['image']}`\n"
                     f"**Type:** `{instance['type']}`\n"
                     f"**IPv4 Addresses:**\n{ipv4_text}\n"
@@ -346,7 +420,7 @@ class InstanceCreationView(discord.ui.View):
                 )
                 embed.add_field(name="Instance ID", value=f"`{instance['id']}`")
                 embed.add_field(name="Label", value=f"`{instance['label']}`")
-                embed.add_field(name="Region", value=f"`{instance['region']}`")
+                embed.add_field(name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})")
                 
                 # Add IP information to the public embed as well
                 if ipv4_addresses:
@@ -456,7 +530,7 @@ async def create_instance(interaction: discord.Interaction):
     
     await interaction.followup.send(embed=embed, view=view)
 
-@bot.tree.command(name="list-instances", description="List your Akamai Cloud instances")
+@bot.tree.command(name="list-instances", description="List your Akamai Cloud instances (auto-refreshed every minute)")
 async def list_instances(interaction: discord.Interaction):
     """Command to list a user's Akamai Cloud instances."""
     await interaction.response.defer(thinking=True)
@@ -477,9 +551,16 @@ async def list_instances(interaction: discord.Interaction):
             color=discord.Color.blue()
         )
         
+        # Get region details
+        region_id = instance.get('region', 'Unknown')
+        region_info = next((r for r in cache["regions"] if r.get("id") == region_id), None)
+        region_label = region_info.get("label", "Unknown") if region_info else "Unknown"
+        country_code = region_info.get("country", "") if region_info else ""
+        flag_emoji = get_country_flag(country_code)
+        
         # Add instance details
         embed.add_field(name="Status", value=f"`{instance.get('status', 'Unknown')}`")
-        embed.add_field(name="Region", value=f"`{instance.get('region', 'Unknown')}`")
+        embed.add_field(name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})")
         embed.add_field(name="Type", value=f"`{instance.get('type', 'Unknown')}`")
         
         # Add IP addresses if available
@@ -487,6 +568,9 @@ async def list_instances(interaction: discord.Interaction):
         if ipv4:
             formatted_ips = "\n".join([f"`{ip}`" for ip in ipv4])
             embed.add_field(name="IPv4", value=formatted_ips, inline=False)
+        
+        # Add footer with auto-refresh information
+        embed.set_footer(text=f"Instances are automatically refreshed every minute")
         
         embeds.append(embed)
     
@@ -519,48 +603,6 @@ async def delete_instance(interaction: discord.Interaction, instance_id: int):
     
     await interaction.followup.send(embed=embed, view=view)
 
-@bot.tree.command(name="refresh-instance", description="Refresh an Akamai Cloud instance's status")
-@app_commands.describe(instance_id="The ID of the Akamai Cloud instance to refresh")
-async def refresh_instance(interaction: discord.Interaction, instance_id: int):
-    """Command to refresh an Akamai Cloud instance's status."""
-    await interaction.response.defer(thinking=True)
-    
-    user_id = str(interaction.user.id)
-    instance = db.get_instance(user_id, instance_id)
-    
-    if not instance:
-        await interaction.followup.send(f"You don't have an Akamai Cloud instance with ID {instance_id}.")
-        return
-    
-    try:
-        # Get the latest instance data
-        updated_instance = akamai_api.get_instance(instance_id)
-        
-        # Update the database
-        db.update_instance(user_id, instance_id, updated_instance)
-        
-        # Create embed
-        embed = discord.Embed(
-            title=f"Akamai Cloud: {updated_instance.get('label', 'Unknown')}",
-            description=f"ID: {updated_instance.get('id', 'Unknown')}",
-            color=discord.Color.green()
-        )
-        
-        # Add instance details
-        embed.add_field(name="Status", value=updated_instance.get('status', 'Unknown'))
-        embed.add_field(name="Region", value=updated_instance.get('region', 'Unknown'))
-        embed.add_field(name="Type", value=updated_instance.get('type', 'Unknown'))
-        
-        # Add IP addresses if available
-        ipv4 = updated_instance.get('ipv4', [])
-        if ipv4:
-            embed.add_field(name="IPv4", value="\n".join(ipv4), inline=False)
-        
-        await interaction.followup.send(embed=embed)
-    
-    except Exception as e:
-        await interaction.followup.send(f"Failed to refresh Akamai Cloud instance: {str(e)}")
-
 @bot.tree.command(name="reboot-instance", description="Reboot an Akamai Cloud instance")
 @app_commands.describe(instance_id="The ID of the Akamai Cloud instance to reboot")
 async def reboot_instance(interaction: discord.Interaction, instance_id: int):
@@ -583,39 +625,19 @@ async def reboot_instance(interaction: discord.Interaction, instance_id: int):
     except Exception as e:
         await interaction.followup.send(f"Failed to reboot Akamai Cloud instance: {str(e)}")
 
-# Add aliases for backward compatibility
-@bot.tree.command(name="create-linode", description="Create a new Akamai Cloud instance")
-async def create_linode(interaction: discord.Interaction):
-    """Alias for create-instance command."""
-    await create_instance(interaction)
-
-@bot.tree.command(name="list-linodes", description="List your Akamai Cloud instances")
-async def list_linodes(interaction: discord.Interaction):
-    """Alias for list-instances command."""
-    await list_instances(interaction)
-
-@bot.tree.command(name="delete-linode", description="Delete an Akamai Cloud instance")
-@app_commands.describe(instance_id="The ID of the Akamai Cloud instance to delete")
-async def delete_linode(interaction: discord.Interaction, instance_id: int):
-    """Alias for delete-instance command."""
-    await delete_instance(interaction, instance_id)
-
-@bot.tree.command(name="refresh-linode", description="Refresh an Akamai Cloud instance's status")
-@app_commands.describe(instance_id="The ID of the Akamai Cloud instance to refresh")
-async def refresh_linode(interaction: discord.Interaction, instance_id: int):
-    """Alias for refresh-instance command."""
-    await refresh_instance(interaction, instance_id)
-
-@bot.tree.command(name="reboot-linode", description="Reboot an Akamai Cloud instance")
-@app_commands.describe(instance_id="The ID of the Akamai Cloud instance to reboot")
-async def reboot_linode(interaction: discord.Interaction, instance_id: int):
-    """Alias for reboot-instance command."""
-    await reboot_instance(interaction, instance_id)
-
 if __name__ == "__main__":
     if not DISCORD_TOKEN:
         print("Error: DISCORD_TOKEN not found in environment variables")
         exit(1)
     
     print("Starting Akamai Cloud Bot...")
-    bot.run(DISCORD_TOKEN) 
+    
+    try:
+        bot.run(DISCORD_TOKEN)
+    except KeyboardInterrupt:
+        print("Shutting down Akamai Cloud Bot...")
+        if auto_refresh_instances.is_running():
+            auto_refresh_instances.cancel()
+            print("Stopped automatic instance refresh task")
+    finally:
+        print("Bot has been shut down")
