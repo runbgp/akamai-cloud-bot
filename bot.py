@@ -252,12 +252,10 @@ class TypeSelect(discord.ui.Select):
             
         # Define priority instance types (common sizes from smallest to largest)
         priority_types = [
-            "g6-nanode-1",    # Smallest/cheapest
-            "g6-standard-1",  # Small standard
-            "g6-standard-2",  # Medium standard
-            "g6-standard-4",  # Larger standard
-            "g6-standard-8",  # Largest standard we'll show
-            "g6-dedicated-8"  # One dedicated option
+            "g6-nanode-1",
+            "g6-standard-1",
+            "g6-standard-2",
+            "g6-standard-4"
         ]
         
         # Sort types by priority
