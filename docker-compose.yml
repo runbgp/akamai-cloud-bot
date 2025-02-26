@@ -1,0 +1,8 @@
+services:
+  akamai-cloud-bot:
+    image: ghcr.io/runbgp/akamai-cloud-bot:latest
+    restart: unless-stopped
+    container_name: akamai-cloud-bot
+    volumes:
+      - .env:/.env
+      - ./akamai_instances.json:/akamai-cloud-bot/akamai_instances.json
