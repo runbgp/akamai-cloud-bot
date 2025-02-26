@@ -24,7 +24,7 @@ A Discord bot that allows users to create, check the status of, and delete Akama
    ```
 4. Run the bot:
    ```
-   python bot.py
+   python3 bot.py
    ```
 
 ## Commands
