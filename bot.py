@@ -59,7 +59,7 @@ async def on_ready():
         print("Started automatic instance refresh task")
 
 async def update_cache():
-    """Update the cache with Akamai Cloud data."""
+    """Update the cache with Akamai Cloud API data."""
     try:
         cache["regions"] = akamai_api.get_regions()
         cache["images"] = akamai_api.get_images()
@@ -180,7 +180,7 @@ class RegionSelect(discord.ui.Select):
         super().__init__(placeholder="Select a region", options=options)
 
 class ImageSelect(discord.ui.Select):
-    """Dropdown for selecting an Akamai Cloud image (OS)."""
+    """Dropdown for selecting an Akamai Cloud instance image (OS)."""
     
     def __init__(self, images):
         # Check if images is None or empty
@@ -194,7 +194,7 @@ class ImageSelect(discord.ui.Select):
         public_images = [img for img in images if img.get("is_public", False) and not img.get("deprecated", True)]
         
         # Define priority distributions to show first
-        priority_vendors = ["Ubuntu", "Debian", "CentOS", "AlmaLinux", "Fedora"]
+        priority_vendors = ["Ubuntu", "Debian", "AlmaLinux", "Fedora", "Alpine"]
         
         # Find Ubuntu 24.04 LTS image
         ubuntu_24_04_id = "linode/ubuntu24.04"
@@ -403,7 +403,7 @@ class InstanceCreationView(discord.ui.View):
                     f"**Region:** {flag_emoji} `{region_id}` ({region_label})\n"
                     f"**Image:** `{instance['image']}`\n"
                     f"**Type:** `{instance['type']}`\n"
-                    f"**IPv4 Addresses:**\n{ipv4_text}\n"
+                    f"**IPv4 Address:** {ipv4_text}\n"
                     f"**IPv6 Address:** {ipv6_text}\n"
                     f"**Root Password:** `{root_pass}`\n\n"
                     f"**IMPORTANT:** Please save this information, especially the root password. "
@@ -508,7 +508,7 @@ async def create_instance(interaction: discord.Interaction):
     
     # Create an embed with instructions and default selections
     embed = discord.Embed(
-        title="Create Akamai Cloud Instance",
+        title="Create an Akamai Cloud Instance",
         description="Please configure your Akamai Cloud instance by selecting options from the dropdowns below.",
         color=discord.Color.blue()
     )
