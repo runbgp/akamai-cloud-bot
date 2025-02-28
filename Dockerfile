@@ -1,4 +1,4 @@
-FROM python:3.13-slim-bookworm
+FROM python:3.13-slim
 
 ENV PYTHONUNBUFFERED=1
 
@@ -7,4 +7,4 @@ WORKDIR /akamai-cloud-bot
 
 RUN pip3 install -r requirements.txt
 
-CMD ["python3", "bot.py"]
+CMD ["python3", "akamai_cloud_bot.py"]
