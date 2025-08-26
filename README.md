@@ -13,18 +13,22 @@ A Discord bot that allows users to create, check the status of, and delete Akama
 ## Setup
 
 1. Clone this repository
-2. Install dependencies:
+2. Install uv (Python package manager):
    ```
-   pip install -r requirements.txt
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
-3. Create a `.env` file with the following variables:
+3. Install dependencies:
+   ```
+   uv sync
+   ```
+4. Create a `.env` file with the following variables:
    ```
    DISCORD_TOKEN=your_discord_bot_token
    AKAMAI_API_TOKEN=your_akamai_cloud_api_token
    ```
-4. Run the bot:
+5. Run the bot:
    ```
-   python3 akamai_cloud_bot.py
+   uv run akamai_cloud_bot.py
    ```
 
 ## Commands
