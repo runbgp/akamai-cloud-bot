@@ -901,6 +901,93 @@ async def reboot_instance(interaction: discord.Interaction, instance_id: int):
         await interaction.followup.send(f"Failed to reboot Akamai Cloud instance: {str(e)}")
 
 
+def _find_owner_of_instance(instance_id: int) -> Optional[str]:
+    """Return the Discord user_id that owns a tracked instance, or None."""
+    for user_id, instance in db.iter_all_full():
+        if instance.get("id") == instance_id:
+            return user_id
+    return None
+
+
+async def _import_instance_for_user(user_id: str, instance_id: int) -> Dict[str, Any]:
+    """Fetch the live Linode instance and add it to the DB under user_id.
+
+    Raises ValueError if it's already tracked (by anyone) or doesn't exist.
+    """
+    existing_owner = _find_owner_of_instance(instance_id)
+    if existing_owner is not None:
+        raise ValueError(
+            f"Instance {instance_id} is already tracked under user {existing_owner}."
+        )
+
+    # Will raise on 404/etc. — caller surfaces the message.
+    live = akamai_api.get_instance(instance_id)
+    db.add_instance(user_id, live)
+    return live
+
+
+def _import_success_embed(user_id: str, instance: Dict[str, Any]) -> discord.Embed:
+    region_id = instance.get("region", "Unknown")
+    region_info = next((r for r in cache["regions"] if r.get("id") == region_id), None)
+    region_label = region_info.get("label", "Unknown") if region_info else "Unknown"
+    country_code = region_info.get("country", "") if region_info else ""
+    flag_emoji = get_country_flag(country_code)
+    next_check = _utcnow() + datetime.timedelta(days=NUDGE_INTERVAL_DAYS)
+
+    embed = discord.Embed(
+        title="Akamai Cloud Instance Imported",
+        description=(
+            f"Now tracking `{instance.get('label', 'Unknown')}` "
+            f"(`{instance.get('id')}`) for <@{user_id}>."
+        ),
+        color=discord.Color.green(),
+    )
+    embed.add_field(name="Status", value=f"`{instance.get('status', 'Unknown')}`")
+    embed.add_field(name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})")
+    embed.add_field(name="Type", value=f"`{instance.get('type', 'Unknown')}`")
+
+    ipv4 = instance.get("ipv4", []) or []
+    if ipv4:
+        embed.add_field(name="IPv4", value="\n".join(f"`{ip}`" for ip in ipv4), inline=False)
+
+    embed.add_field(
+        name="Auto-cleanup",
+        value=(
+            f"Next usage check: <t:{int(next_check.timestamp())}:R>. "
+            f"Use `/keep-instance {instance.get('id')}` to confirm anytime."
+        ),
+        inline=False,
+    )
+    return embed
+
+
+@bot.tree.command(
+    name="import-instance",
+    description="Track an existing Akamai Cloud VM you own (e.g. created manually)",
+)
+@app_commands.describe(
+    instance_id="The ID of the Akamai Cloud instance to track under your account",
+)
+async def import_instance(interaction: discord.Interaction, instance_id: int):
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    user_id = str(interaction.user.id)
+
+    try:
+        instance = await _import_instance_for_user(user_id, instance_id)
+    except ValueError as e:
+        await interaction.followup.send(str(e), ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(
+            f"Couldn't import instance {instance_id}: {e}", ephemeral=True
+        )
+        return
+
+    await interaction.followup.send(
+        embed=_import_success_embed(user_id, instance), ephemeral=True
+    )
+
+
 @bot.tree.command(
     name="keep-instance",
     description="Confirm you're still using a VM (resets the auto-cleanup clock)",
@@ -1042,6 +1129,40 @@ async def admin_list_all(interaction: discord.Interaction):
     if len(body) > 1900:
         body = body[:1900] + "\n…(truncated)"
     await interaction.response.send_message(body, ephemeral=True)
+
+
+@bot.tree.command(
+    name="admin-import-instance",
+    description="(admin) Track an existing Akamai Cloud VM under another user's account",
+)
+@app_commands.describe(
+    user_id="Discord user ID to associate the instance with",
+    instance_id="Akamai Cloud instance ID",
+)
+async def admin_import_instance(
+    interaction: discord.Interaction,
+    user_id: str,
+    instance_id: int,
+):
+    if not is_admin(str(interaction.user.id)):
+        await interaction.response.send_message("Not authorized.", ephemeral=True)
+        return
+
+    await interaction.response.defer(thinking=True, ephemeral=True)
+    try:
+        instance = await _import_instance_for_user(user_id, instance_id)
+    except ValueError as e:
+        await interaction.followup.send(str(e), ephemeral=True)
+        return
+    except Exception as e:
+        await interaction.followup.send(
+            f"Couldn't import instance {instance_id}: {e}", ephemeral=True
+        )
+        return
+
+    await interaction.followup.send(
+        embed=_import_success_embed(user_id, instance), ephemeral=True
+    )
 
 
 if __name__ == "__main__":

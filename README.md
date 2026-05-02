@@ -39,12 +39,14 @@ A Discord bot that allows users to create, check the status of, and delete Akama
 - `/delete-instance` - Delete an Akamai Cloud instance
 - `/reboot-instance` - Reboot an Akamai Cloud instance
 - `/keep-instance` - Confirm you're still using a VM (resets the auto-cleanup clock; fallback for missed DM nudges)
+- `/import-instance <instance_id>` - Track an existing Akamai Cloud VM you own (one created manually, or that fell out of the bot's database) under your Discord account
 
 Admin-only (requires the user's Discord ID in `ADMIN_USER_IDS`):
 
 - `/admin-extend <user_id> <instance_id> <days>` - Push the next usage check out
 - `/admin-exempt <user_id> <instance_id> <true|false>` - Toggle a VM's exemption from auto-cleanup
 - `/admin-list-all` - List every tracked instance and its nudge state
+- `/admin-import-instance <user_id> <instance_id>` - Track an existing VM under another user's account
 
 ## Auto-cleanup
 
