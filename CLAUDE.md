@@ -41,6 +41,6 @@ Three modules, no package structure:
 
 ## Conventions
 
-- Python 3.13+ (see `pyproject.toml`); pinned exact versions for `discord.py`, `python-dotenv`, `requests`.
+- Python 3.14+ (see `pyproject.toml`); pinned exact versions for `discord.py`, `python-dotenv`, `requests`.
 - All user-facing IDs are stringified Discord user IDs (`str(interaction.user.id)`). Instance IDs from the Linode API are ints. Don't mix them when touching `database.py`.
 - Slash commands are registered via `@bot.tree.command(...)` and synced in `on_ready`. New commands won't appear in Discord until the bot reconnects and `bot.tree.sync()` runs.
