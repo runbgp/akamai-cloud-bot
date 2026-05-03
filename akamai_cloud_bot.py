@@ -647,7 +647,7 @@ class InstanceCreationView(discord.ui.View):
                 ipv6_address = updated_instance.get('ipv6', '')
 
                 if ipv4_addresses:
-                    ipv4_text = "\n".join([f"- `{ip}`" for ip in ipv4_addresses])
+                    ipv4_text = ", ".join(f"`{ip}`" for ip in ipv4_addresses)
                 else:
                     ipv4_text = "None assigned yet"
 
