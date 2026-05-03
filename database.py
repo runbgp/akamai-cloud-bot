@@ -39,7 +39,10 @@ class Database:
         self._ensure_db_exists()
 
     def _ensure_db_exists(self):
-        if not os.path.exists(self.db_file):
+        # Treat both "missing" and "exists but empty" as needing initialization —
+        # `docker run` with a bind mount to a non-existent host file creates an
+        # empty file, which would otherwise crash json.load on first read.
+        if not os.path.exists(self.db_file) or os.path.getsize(self.db_file) == 0:
             with open(self.db_file, "w") as f:
                 json.dump({"_meta": {}, "users": {}}, f)
 
