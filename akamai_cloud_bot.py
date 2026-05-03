@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import asyncio
 import random
 import string
-from typing import Dict, List, Optional, Any
+from typing import Dict, Optional, Any
 import datetime
 
 from akamai_api import AkamaiCloudAPI
@@ -38,11 +38,7 @@ akamai_api = AkamaiCloudAPI()
 db = Database()
 
 # Cache for regions, images, and types
-cache = {
-    "regions": [],
-    "images": [],
-    "types": []
-}
+cache = {"regions": [], "images": [], "types": []}
 
 # Set on first nudge tick after startup so we extend grace by any downtime.
 _downtime_extension_seconds: Optional[float] = None
@@ -100,10 +96,11 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync commands: {e}")
 
-    await bot.change_presence(activity=discord.Activity(
-        type=discord.ActivityType.watching,
-        name="Akamai Cloud"
-    ))
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.watching, name="Akamai Cloud"
+        )
+    )
 
     await update_cache()
 
@@ -136,16 +133,22 @@ async def auto_refresh_instances():
         if not all_instances:
             return
 
-        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refreshing {len(all_instances)} instances...")
+        print(
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refreshing {len(all_instances)} instances..."
+        )
 
         for user_id, instance_id in all_instances:
             try:
                 updated_instance = akamai_api.get_instance(instance_id)
                 db.update_instance(user_id, instance_id, updated_instance)
             except Exception as e:
-                print(f"Failed to refresh instance {instance_id} for user {user_id}: {e}")
+                print(
+                    f"Failed to refresh instance {instance_id} for user {user_id}: {e}"
+                )
 
-        print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refresh completed")
+        print(
+            f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Auto-refresh completed"
+        )
     except Exception as e:
         print(f"Error in auto_refresh_instances task: {e}")
 
@@ -185,8 +188,14 @@ async def check_nudges():
     for user_id, instance in list(db.iter_all_full()):
         try:
             await _process_one_nudge(
-                user_id, instance, now, interval, grace, reminder_lead,
-                max_lifetime, extension,
+                user_id,
+                instance,
+                now,
+                interval,
+                grace,
+                reminder_lead,
+                max_lifetime,
+                extension,
             )
         except Exception as e:
             print(f"Nudge check failed for {user_id}/{instance.get('id')}: {e}")
@@ -209,7 +218,6 @@ async def _process_one_nudge(
     max_lifetime: Optional[datetime.timedelta],
     extension: datetime.timedelta,
 ):
-    instance_id = instance.get("id")
     nudge = instance.get("_nudge") or {}
     if nudge.get("exempt"):
         return
@@ -222,7 +230,8 @@ async def _process_one_nudge(
         created_at = _parse_iso(instance.get("created"))
         if created_at and (now - created_at) > max_lifetime:
             await _force_delete(
-                user_id, instance,
+                user_id,
+                instance,
                 reason=f"reached the maximum lifetime of {MAX_LIFETIME_DAYS} days",
             )
             return
@@ -239,15 +248,13 @@ async def _process_one_nudge(
 
     if elapsed >= grace:
         await _force_delete(
-            user_id, instance,
+            user_id,
+            instance,
             reason=f"no confirmation within {NUDGE_GRACE_DAYS} days",
         )
         return
 
-    if (
-        nudge.get("reminder_sent_at") is None
-        and elapsed >= (grace - reminder_lead)
-    ):
+    if nudge.get("reminder_sent_at") is None and elapsed >= (grace - reminder_lead):
         await _send_nudge(user_id, instance, kind="reminder")
 
 
@@ -294,8 +301,12 @@ async def _send_nudge(user_id: str, instance: Dict[str, Any], kind: str):
         color = discord.Color.gold()
 
     embed = discord.Embed(title=title, description=intro, color=color)
-    embed.add_field(name="Instance", value=_instance_summary_lines(instance), inline=False)
-    embed.set_footer(text="Click 'Keep it' to extend, or 'Delete now' to release the resources.")
+    embed.add_field(
+        name="Instance", value=_instance_summary_lines(instance), inline=False
+    )
+    embed.set_footer(
+        text="Click 'Keep it' to extend, or 'Delete now' to release the resources."
+    )
 
     view = NudgeView()
     try:
@@ -311,11 +322,13 @@ async def _send_nudge(user_id: str, instance: Dict[str, Any], kind: str):
 
     fields = {"last_dm_failed": False}
     if kind == "initial":
-        fields.update({
-            "nudge_sent_at": _utcnow().isoformat(),
-            "reminder_sent_at": None,
-            "nudge_count": (instance.get("_nudge") or {}).get("nudge_count", 0) + 1,
-        })
+        fields.update(
+            {
+                "nudge_sent_at": _utcnow().isoformat(),
+                "reminder_sent_at": None,
+                "nudge_count": (instance.get("_nudge") or {}).get("nudge_count", 0) + 1,
+            }
+        )
     else:
         fields["reminder_sent_at"] = _utcnow().isoformat()
     db.update_nudge(user_id, instance_id, **fields)
@@ -347,7 +360,7 @@ async def _force_delete(user_id: str, instance: Dict[str, Any], reason: str):
 def generate_password(length=16):
     """Generate a secure random password."""
     chars = string.ascii_letters + string.digits + "!@#$%^&*()_-+=<>?"
-    return ''.join(random.choice(chars) for _ in range(length))
+    return "".join(random.choice(chars) for _ in range(length))
 
 
 def get_country_flag(country_code):
@@ -356,8 +369,8 @@ def get_country_flag(country_code):
         return "🌐"
 
     country_code = country_code.upper()
-    first_letter = ord(country_code[0]) - ord('A') + ord('🇦')
-    second_letter = ord(country_code[1]) - ord('A') + ord('🇦')
+    first_letter = ord(country_code[0]) - ord("A") + ord("🇦")
+    second_letter = ord(country_code[1]) - ord("A") + ord("🇦")
     return chr(first_letter) + chr(second_letter)
 
 
@@ -377,7 +390,9 @@ class NudgeView(discord.ui.View):
         style=discord.ButtonStyle.success,
         custom_id="nudge:keep",
     )
-    async def keep_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def keep_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self._handle(interaction, keep=True)
 
     @discord.ui.button(
@@ -385,7 +400,9 @@ class NudgeView(discord.ui.View):
         style=discord.ButtonStyle.danger,
         custom_id="nudge:delete",
     )
-    async def delete_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def delete_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         await self._handle(interaction, keep=False)
 
     async def _handle(self, interaction: discord.Interaction, keep: bool):
@@ -394,7 +411,8 @@ class NudgeView(discord.ui.View):
         # Find an instance with an active nudge — there's almost always at most one
         # at a time per user, but be defensive if multiple are pending.
         pending = [
-            inst for inst in instances
+            inst
+            for inst in instances
             if (inst.get("_nudge") or {}).get("nudge_sent_at") is not None
         ]
 
@@ -413,7 +431,8 @@ class NudgeView(discord.ui.View):
 
         if keep:
             db.update_nudge(
-                user_id, instance_id,
+                user_id,
+                instance_id,
                 last_confirmed_at=_utcnow().isoformat(),
                 nudge_sent_at=None,
                 reminder_sent_at=None,
@@ -444,14 +463,25 @@ class RegionSelect(discord.ui.Select):
 
     def __init__(self, regions):
         if not regions:
-            super().__init__(placeholder="No regions available", options=[
-                discord.SelectOption(label="No regions available", value="none")
-            ])
+            super().__init__(
+                placeholder="No regions available",
+                options=[
+                    discord.SelectOption(label="No regions available", value="none")
+                ],
+            )
             return
 
         priority_regions = [
-            "us-iad", "us-ord", "us-sea", "us-lax", "us-mia",
-            "gb-lon", "de-fra-2", "se-sto", "nl-ams", "fr-par"
+            "us-iad",
+            "us-ord",
+            "us-sea",
+            "us-lax",
+            "us-mia",
+            "gb-lon",
+            "de-fra-2",
+            "se-sto",
+            "nl-ams",
+            "fr-par",
         ]
 
         sorted_regions = []
@@ -474,7 +504,7 @@ class RegionSelect(discord.ui.Select):
                 discord.SelectOption(
                     label=f"{flag_emoji} {region_id}",
                     description=region_label,
-                    value=region_id
+                    value=region_id,
                 )
             )
 
@@ -489,26 +519,37 @@ class ImageSelect(discord.ui.Select):
 
     def __init__(self, images):
         if not images:
-            super().__init__(placeholder="No images available", options=[
-                discord.SelectOption(label="No images available", value="none")
-            ])
+            super().__init__(
+                placeholder="No images available",
+                options=[
+                    discord.SelectOption(label="No images available", value="none")
+                ],
+            )
             return
 
-        public_images = [img for img in images if img.get("is_public", False) and not img.get("deprecated", True)]
+        public_images = [
+            img
+            for img in images
+            if img.get("is_public", False) and not img.get("deprecated", True)
+        ]
 
         priority_vendors = ["Ubuntu", "Debian", "AlmaLinux", "Fedora", "Alpine"]
 
         ubuntu_24_04_id = "linode/ubuntu24.04"
-        ubuntu_24_04_image = next((img for img in public_images if img.get("id") == ubuntu_24_04_id), None)
+        ubuntu_24_04_image = next(
+            (img for img in public_images if img.get("id") == ubuntu_24_04_id), None
+        )
 
         final_images = []
         if ubuntu_24_04_image:
             final_images.append(ubuntu_24_04_image)
 
         for vendor in priority_vendors:
-            vendor_images = [img for img in public_images
-                            if img.get("vendor") == vendor
-                            and img.get("id") != ubuntu_24_04_id]
+            vendor_images = [
+                img
+                for img in public_images
+                if img.get("vendor") == vendor and img.get("id") != ubuntu_24_04_id
+            ]
             vendor_images.sort(key=lambda x: x.get("label", ""), reverse=True)
             final_images.extend(vendor_images[:3])
             if len(final_images) >= 20:
@@ -516,16 +557,21 @@ class ImageSelect(discord.ui.Select):
 
         options = [
             discord.SelectOption(
-                label=f"{img.get('vendor', 'Unknown')} - {img.get('label', 'Unknown')}"[:100],
+                label=f"{img.get('vendor', 'Unknown')} - {img.get('label', 'Unknown')}"[
+                    :100
+                ],
                 value=img.get("id", "unknown"),
                 description=(img.get("description", "") or "")[:100],
-                default=(img.get("id") == ubuntu_24_04_id)
+                default=(img.get("id") == ubuntu_24_04_id),
             )
-            for img in final_images[:25] if img
+            for img in final_images[:25]
+            if img
         ]
 
         if not options:
-            options = [discord.SelectOption(label="No valid images found", value="none")]
+            options = [
+                discord.SelectOption(label="No valid images found", value="none")
+            ]
 
         super().__init__(placeholder="Select an operating system", options=options)
 
@@ -535,16 +581,21 @@ class TypeSelect(discord.ui.Select):
 
     def __init__(self, types):
         if not types:
-            super().__init__(placeholder="No instance types available", options=[
-                discord.SelectOption(label="No instance types available", value="none")
-            ])
+            super().__init__(
+                placeholder="No instance types available",
+                options=[
+                    discord.SelectOption(
+                        label="No instance types available", value="none"
+                    )
+                ],
+            )
             return
 
         priority_types = [
             "g6-nanode-1",
             "g6-standard-1",
             "g6-standard-2",
-            "g6-standard-4"
+            "g6-standard-4",
         ]
 
         sorted_types = []
@@ -557,14 +608,19 @@ class TypeSelect(discord.ui.Select):
             discord.SelectOption(
                 label=f"{t.get('label', 'Unknown')} ({t.get('id', 'unknown')})",
                 value=t.get("id", "unknown"),
-                description=f"${t.get('price', {}).get('monthly', 0)}/mo - {t.get('memory', 0)/1024}GB RAM, {t.get('vcpus', 0)} vCPUs"[:100],
-                default=(t.get("id") == "g6-nanode-1")
+                description=f"${t.get('price', {}).get('monthly', 0)}/mo - {t.get('memory', 0) / 1024}GB RAM, {t.get('vcpus', 0)} vCPUs"[
+                    :100
+                ],
+                default=(t.get("id") == "g6-nanode-1"),
             )
-            for t in sorted_types if t
+            for t in sorted_types
+            if t
         ]
 
         if not options:
-            options = [discord.SelectOption(label="No instance types available", value="none")]
+            options = [
+                discord.SelectOption(label="No instance types available", value="none")
+            ]
 
         super().__init__(placeholder="Select an instance type", options=options)
 
@@ -593,33 +649,45 @@ class InstanceCreationView(discord.ui.View):
 
     async def region_callback(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
         self.region = self.region_select.values[0]
         await interaction.response.defer()
 
     async def image_callback(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
         self.image = self.image_select.values[0]
         await interaction.response.defer()
 
     async def type_callback(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
         self.type = self.type_select.values[0]
         await interaction.response.defer()
 
     @discord.ui.button(label="Create Instance", style=discord.ButtonStyle.green)
-    async def create_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def create_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
 
         if not self.region:
-            await interaction.response.send_message("Please select a region first!", ephemeral=True)
+            await interaction.response.send_message(
+                "Please select a region first!", ephemeral=True
+            )
             return
 
         await interaction.response.defer(thinking=True)
@@ -633,18 +701,18 @@ class InstanceCreationView(discord.ui.View):
                 region=self.region,
                 image=self.image,
                 root_pass=root_pass,
-                type=self.type
+                type=self.type,
             )
 
             await asyncio.sleep(5)
-            updated_instance = akamai_api.get_instance(instance['id'])
+            updated_instance = akamai_api.get_instance(instance["id"])
             db.add_instance(str(interaction.user.id), updated_instance)
 
             try:
                 dm_channel = await interaction.user.create_dm()
 
-                ipv4_addresses = updated_instance.get('ipv4', [])
-                ipv6_address = updated_instance.get('ipv6', '')
+                ipv4_addresses = updated_instance.get("ipv4", [])
+                ipv6_address = updated_instance.get("ipv6", "")
 
                 if ipv4_addresses:
                     ipv4_text = ", ".join(f"`{ip}`" for ip in ipv4_addresses)
@@ -653,9 +721,13 @@ class InstanceCreationView(discord.ui.View):
 
                 ipv6_text = f"`{ipv6_address}`" if ipv6_address else "None assigned yet"
 
-                region_id = instance.get('region', 'Unknown')
-                region_info = next((r for r in cache["regions"] if r.get("id") == region_id), None)
-                region_label = region_info.get("label", "Unknown") if region_info else "Unknown"
+                region_id = instance.get("region", "Unknown")
+                region_info = next(
+                    (r for r in cache["regions"] if r.get("id") == region_id), None
+                )
+                region_label = (
+                    region_info.get("label", "Unknown") if region_info else "Unknown"
+                )
                 country_code = region_info.get("country", "") if region_info else ""
                 flag_emoji = get_country_flag(country_code)
 
@@ -678,15 +750,19 @@ class InstanceCreationView(discord.ui.View):
 
                 embed = discord.Embed(
                     title="Akamai Cloud Instance Created",
-                    description=f"Your Akamai Cloud instance has been created successfully! Check your DMs for details.",
-                    color=discord.Color.green()
+                    description="Your Akamai Cloud instance has been created successfully! Check your DMs for details.",
+                    color=discord.Color.green(),
                 )
                 embed.add_field(name="Instance ID", value=f"`{instance['id']}`")
                 embed.add_field(name="Label", value=f"`{instance['label']}`")
-                embed.add_field(name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})")
+                embed.add_field(
+                    name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})"
+                )
 
                 if ipv4_addresses:
-                    embed.add_field(name="IPv4", value=f"`{ipv4_addresses[0]}`", inline=False)
+                    embed.add_field(
+                        name="IPv4", value=f"`{ipv4_addresses[0]}`", inline=False
+                    )
 
                 await interaction.followup.send(embed=embed)
 
@@ -697,7 +773,9 @@ class InstanceCreationView(discord.ui.View):
                 )
 
         except Exception as e:
-            await interaction.followup.send(f"Failed to create Akamai Cloud instance: {str(e)}")
+            await interaction.followup.send(
+                f"Failed to create Akamai Cloud instance: {str(e)}"
+            )
 
         for child in self.children:
             child.disabled = True
@@ -714,9 +792,13 @@ class InstanceDeleteView(discord.ui.View):
         self.instance_id = instance_id
 
     @discord.ui.button(label="Confirm Delete", style=discord.ButtonStyle.danger)
-    async def confirm_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def confirm_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
 
         await interaction.response.defer(thinking=True)
@@ -725,12 +807,18 @@ class InstanceDeleteView(discord.ui.View):
             success = akamai_api.delete_instance(self.instance_id)
             if success:
                 db.remove_instance(self.user_id, self.instance_id)
-                await interaction.followup.send(f"Akamai Cloud instance {self.instance_id} has been deleted successfully.")
+                await interaction.followup.send(
+                    f"Akamai Cloud instance {self.instance_id} has been deleted successfully."
+                )
             else:
-                await interaction.followup.send(f"Failed to delete Akamai Cloud instance {self.instance_id}.")
+                await interaction.followup.send(
+                    f"Failed to delete Akamai Cloud instance {self.instance_id}."
+                )
 
         except Exception as e:
-            await interaction.followup.send(f"Error deleting Akamai Cloud instance: {str(e)}")
+            await interaction.followup.send(
+                f"Error deleting Akamai Cloud instance: {str(e)}"
+            )
 
         for child in self.children:
             child.disabled = True
@@ -738,9 +826,13 @@ class InstanceDeleteView(discord.ui.View):
         await interaction.edit_original_response(view=self)
 
     @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
-    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def cancel_button(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("This is not your menu!", ephemeral=True)
+            await interaction.response.send_message(
+                "This is not your menu!", ephemeral=True
+            )
             return
 
         await interaction.response.send_message("Deletion cancelled.", ephemeral=True)
@@ -772,7 +864,9 @@ def _nudge_status_text(instance: Dict[str, Any]) -> str:
     return "Next usage check pending."
 
 
-@bot.tree.command(name="create-instance", description="Create a new Akamai Cloud instance")
+@bot.tree.command(
+    name="create-instance", description="Create a new Akamai Cloud instance"
+)
 async def create_instance(interaction: discord.Interaction):
     """Command to create a new Akamai Cloud instance."""
     await interaction.response.defer(thinking=True)
@@ -785,19 +879,19 @@ async def create_instance(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Create an Akamai Cloud Instance",
         description="Please configure your Akamai Cloud instance by selecting options from the dropdowns below.",
-        color=discord.Color.blue()
+        color=discord.Color.blue(),
     )
 
     embed.add_field(
         name="Default Selections",
         value="• **Image:** Ubuntu 24.04 LTS (pre-selected)\n• **Type:** Nanode 1GB (pre-selected)\n• **Region:** Please select a region",
-        inline=False
+        inline=False,
     )
 
     embed.add_field(
         name="Instructions",
         value="1. Select a region (required)\n2. You can change the image and instance type if needed\n3. Click 'Create Instance' when ready",
-        inline=False
+        inline=False,
     )
 
     embed.add_field(
@@ -812,7 +906,10 @@ async def create_instance(interaction: discord.Interaction):
     await interaction.followup.send(embed=embed, view=view)
 
 
-@bot.tree.command(name="list-instances", description="List your Akamai Cloud instances (auto-refreshed every minute)")
+@bot.tree.command(
+    name="list-instances",
+    description="List your Akamai Cloud instances (auto-refreshed every minute)",
+)
 async def list_instances(interaction: discord.Interaction):
     """Command to list a user's Akamai Cloud instances."""
     await interaction.response.defer(thinking=True)
@@ -829,25 +926,31 @@ async def list_instances(interaction: discord.Interaction):
         embed = discord.Embed(
             title=f"Akamai Cloud: {instance.get('label', 'Unknown')}",
             description=f"ID: `{instance.get('id', 'Unknown')}`",
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
 
-        region_id = instance.get('region', 'Unknown')
-        region_info = next((r for r in cache["regions"] if r.get("id") == region_id), None)
+        region_id = instance.get("region", "Unknown")
+        region_info = next(
+            (r for r in cache["regions"] if r.get("id") == region_id), None
+        )
         region_label = region_info.get("label", "Unknown") if region_info else "Unknown"
         country_code = region_info.get("country", "") if region_info else ""
         flag_emoji = get_country_flag(country_code)
 
         embed.add_field(name="Status", value=f"`{instance.get('status', 'Unknown')}`")
-        embed.add_field(name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})")
+        embed.add_field(
+            name="Region", value=f"{flag_emoji} `{region_id}` ({region_label})"
+        )
         embed.add_field(name="Type", value=f"`{instance.get('type', 'Unknown')}`")
 
-        ipv4 = instance.get('ipv4', [])
+        ipv4 = instance.get("ipv4", [])
         if ipv4:
             formatted_ips = "\n".join([f"`{ip}`" for ip in ipv4])
             embed.add_field(name="IPv4", value=formatted_ips, inline=False)
 
-        embed.add_field(name="Usage check", value=_nudge_status_text(instance), inline=False)
+        embed.add_field(
+            name="Usage check", value=_nudge_status_text(instance), inline=False
+        )
 
         embed.set_footer(text="Instances are automatically refreshed every minute")
         embeds.append(embed)
@@ -865,7 +968,9 @@ async def delete_instance(interaction: discord.Interaction, instance_id: int):
     instance = db.get_instance(user_id, instance_id)
 
     if not instance:
-        await interaction.followup.send(f"You don't have an Akamai Cloud instance with ID {instance_id}.")
+        await interaction.followup.send(
+            f"You don't have an Akamai Cloud instance with ID {instance_id}."
+        )
         return
 
     view = InstanceDeleteView(user_id, instance_id)
@@ -873,8 +978,8 @@ async def delete_instance(interaction: discord.Interaction, instance_id: int):
     embed = discord.Embed(
         title="Confirm Deletion",
         description=f"Are you sure you want to delete Akamai Cloud instance {instance_id} ({instance.get('label', 'Unknown')})?\n\n"
-                    f"**This action cannot be undone!**",
-        color=discord.Color.red()
+        f"**This action cannot be undone!**",
+        color=discord.Color.red(),
     )
 
     await interaction.followup.send(embed=embed, view=view)
@@ -890,15 +995,21 @@ async def reboot_instance(interaction: discord.Interaction, instance_id: int):
     instance = db.get_instance(user_id, instance_id)
 
     if not instance:
-        await interaction.followup.send(f"You don't have an Akamai Cloud instance with ID {instance_id}.")
+        await interaction.followup.send(
+            f"You don't have an Akamai Cloud instance with ID {instance_id}."
+        )
         return
 
     try:
         akamai_api.reboot_instance(instance_id)
-        await interaction.followup.send(f"Akamai Cloud instance {instance_id} is being rebooted. This may take a few minutes.")
+        await interaction.followup.send(
+            f"Akamai Cloud instance {instance_id} is being rebooted. This may take a few minutes."
+        )
 
     except Exception as e:
-        await interaction.followup.send(f"Failed to reboot Akamai Cloud instance: {str(e)}")
+        await interaction.followup.send(
+            f"Failed to reboot Akamai Cloud instance: {str(e)}"
+        )
 
 
 def _find_owner_of_instance(instance_id: int) -> Optional[str]:
@@ -948,7 +1059,9 @@ def _import_success_embed(user_id: str, instance: Dict[str, Any]) -> discord.Emb
 
     ipv4 = instance.get("ipv4", []) or []
     if ipv4:
-        embed.add_field(name="IPv4", value="\n".join(f"`{ip}`" for ip in ipv4), inline=False)
+        embed.add_field(
+            name="IPv4", value="\n".join(f"`{ip}`" for ip in ipv4), inline=False
+        )
 
     embed.add_field(
         name="Auto-cleanup",
@@ -1004,7 +1117,8 @@ async def keep_instance(interaction: discord.Interaction, instance_id: int):
         return
 
     db.update_nudge(
-        user_id, instance_id,
+        user_id,
+        instance_id,
         last_confirmed_at=_utcnow().isoformat(),
         nudge_sent_at=None,
         reminder_sent_at=None,
@@ -1049,7 +1163,8 @@ async def admin_extend(
 
     new_confirmed = _utcnow() + datetime.timedelta(days=days - NUDGE_INTERVAL_DAYS)
     db.update_nudge(
-        user_id, instance_id,
+        user_id,
+        instance_id,
         last_confirmed_at=new_confirmed.isoformat(),
         nudge_sent_at=None,
         reminder_sent_at=None,
