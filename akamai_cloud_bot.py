@@ -86,8 +86,11 @@ async def on_ready():
     else:
         _downtime_extension_seconds = 0.0
 
-    # Register persistent view so DM buttons survive restarts.
-    bot.add_view(NudgeView())
+    # Register persistent dynamic items so per-instance DM buttons survive
+    # restarts. Each nudge DM gets a fresh View whose Keep/Delete buttons
+    # encode the instance_id in their custom_id; clicks resolve through the
+    # template regex on the dynamic items below.
+    bot.add_dynamic_items(KeepInstanceButton, DeleteInstanceButton)
 
     # Sync commands with Discord
     try:
@@ -125,9 +128,18 @@ async def update_cache():
         print(f"Failed to update cache: {e}")
 
 
-@tasks.loop(minutes=1)
+REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "10"))
+
+
+@tasks.loop(minutes=REFRESH_INTERVAL_MINUTES)
 async def auto_refresh_instances():
-    """Background task to automatically refresh all instances every minute."""
+    """Periodically resync stored Linode state.
+
+    Most instance state changes (status, IPs) are also picked up at read time
+    by `/list-instances` via `_refresh_instances_for_user`, so this loop only
+    needs to be a low-frequency backstop. Default 10 minutes; tune via
+    `REFRESH_INTERVAL_MINUTES`.
+    """
     try:
         all_instances = db.get_all_instances()
         if not all_instances:
@@ -140,7 +152,7 @@ async def auto_refresh_instances():
         for user_id, instance_id in all_instances:
             try:
                 updated_instance = akamai_api.get_instance(instance_id)
-                db.update_instance(user_id, instance_id, updated_instance)
+                await db.update_instance(user_id, instance_id, updated_instance)
             except Exception as e:
                 print(
                     f"Failed to refresh instance {instance_id} for user {user_id}: {e}"
@@ -153,6 +165,24 @@ async def auto_refresh_instances():
         print(f"Error in auto_refresh_instances task: {e}")
 
 
+async def _refresh_instances_for_user(user_id: str) -> list:
+    """Resync the user's instances from Linode and return the fresh list.
+
+    Per-instance failures are logged but don't break the listing.
+    """
+    fresh = []
+    for instance in db.get_user_instances(user_id):
+        instance_id = instance.get("id")
+        try:
+            updated = akamai_api.get_instance(instance_id)
+            await db.update_instance(user_id, instance_id, updated)
+            fresh.append(db.get_instance(user_id, instance_id) or instance)
+        except Exception as e:
+            print(f"List-time refresh failed for {instance_id}: {e}")
+            fresh.append(instance)
+    return fresh
+
+
 @auto_refresh_instances.before_loop
 async def before_auto_refresh():
     await bot.wait_until_ready()
@@ -161,7 +191,7 @@ async def before_auto_refresh():
 @tasks.loop(minutes=5)
 async def heartbeat_meta():
     """Persist last-seen time so we can detect downtime on next boot."""
-    db.set_meta(last_seen_at=_utcnow().isoformat())
+    await db.set_meta(last_seen_at=_utcnow().isoformat())
 
 
 @heartbeat_meta.before_loop
@@ -308,13 +338,15 @@ async def _send_nudge(user_id: str, instance: Dict[str, Any], kind: str):
         text="Click 'Keep it' to extend, or 'Delete now' to release the resources."
     )
 
-    view = NudgeView()
+    view = discord.ui.View(timeout=None)
+    view.add_item(KeepInstanceButton(instance_id))
+    view.add_item(DeleteInstanceButton(instance_id))
     try:
         dm = await user.create_dm()
         await dm.send(embed=embed, view=view)
     except discord.Forbidden:
         print(f"DM forbidden for user {user_id}; marking nudge as undeliverable.")
-        db.update_nudge(user_id, instance_id, last_dm_failed=True)
+        await db.update_nudge(user_id, instance_id, last_dm_failed=True)
         return
     except Exception as e:
         print(f"Failed to DM user {user_id}: {e}")
@@ -331,7 +363,7 @@ async def _send_nudge(user_id: str, instance: Dict[str, Any], kind: str):
         )
     else:
         fields["reminder_sent_at"] = _utcnow().isoformat()
-    db.update_nudge(user_id, instance_id, **fields)
+    await db.update_nudge(user_id, instance_id, **fields)
 
 
 async def _force_delete(user_id: str, instance: Dict[str, Any], reason: str):
@@ -343,7 +375,7 @@ async def _force_delete(user_id: str, instance: Dict[str, Any], reason: str):
         print(f"Failed to delete instance {instance_id} for user {user_id}: {e}")
         return
 
-    db.remove_instance(user_id, instance_id)
+    await db.remove_instance(user_id, instance_id)
     print(f"Deleted instance {instance_id} ({label}) for {user_id}: {reason}")
 
     try:
@@ -374,88 +406,100 @@ def get_country_flag(country_code):
     return chr(first_letter) + chr(second_letter)
 
 
-class NudgeView(discord.ui.View):
-    """Persistent view for the weekly Keep/Delete nudge.
+class KeepInstanceButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"nudge:keep:(?P<instance_id>\d+)",
+):
+    """Per-instance "Keep it" button on a nudge DM.
 
-    Buttons use stable custom_ids so they keep working after the bot restarts.
-    The view itself carries no per-instance state — it looks up which instance
-    the click belongs to via the DM recipient and the button id suffix.
+    The instance_id is encoded in the custom_id, so clicks resolve to the
+    exact VM the message is about even if the bot restarted between send
+    and click.
     """
 
-    def __init__(self):
-        super().__init__(timeout=None)
+    def __init__(self, instance_id: int):
+        super().__init__(
+            discord.ui.Button(
+                style=discord.ButtonStyle.success,
+                label="Keep it",
+                custom_id=f"nudge:keep:{instance_id}",
+            )
+        )
+        self.instance_id = instance_id
 
-    @discord.ui.button(
-        label="Keep it",
-        style=discord.ButtonStyle.success,
-        custom_id="nudge:keep",
-    )
-    async def keep_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        await self._handle(interaction, keep=True)
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["instance_id"]))
 
-    @discord.ui.button(
-        label="Delete now",
-        style=discord.ButtonStyle.danger,
-        custom_id="nudge:delete",
-    )
-    async def delete_button(
-        self, interaction: discord.Interaction, button: discord.ui.Button
-    ):
-        await self._handle(interaction, keep=False)
-
-    async def _handle(self, interaction: discord.Interaction, keep: bool):
+    async def callback(self, interaction: discord.Interaction):
         user_id = str(interaction.user.id)
-        instances = db.get_user_instances(user_id)
-        # Find an instance with an active nudge — there's almost always at most one
-        # at a time per user, but be defensive if multiple are pending.
-        pending = [
-            inst
-            for inst in instances
-            if (inst.get("_nudge") or {}).get("nudge_sent_at") is not None
-        ]
-
-        if not pending:
+        instance = db.get_instance(user_id, self.instance_id)
+        if instance is None:
             await interaction.response.send_message(
-                "No pending confirmation found for your account. You're all set.",
+                "I no longer track that instance under your account.",
                 ephemeral=True,
             )
             return
 
-        # If multiple are pending, prefer the oldest nudge (closest to deletion).
-        pending.sort(key=lambda i: (i.get("_nudge") or {}).get("nudge_sent_at") or "")
-        target = pending[0]
-        instance_id = target.get("id")
-        label = target.get("label", "Unknown")
+        await db.update_nudge(
+            user_id,
+            self.instance_id,
+            last_confirmed_at=_utcnow().isoformat(),
+            nudge_sent_at=None,
+            reminder_sent_at=None,
+        )
+        await interaction.response.send_message(
+            f"Got it — keeping `{instance.get('label', 'Unknown')}` "
+            f"(`{self.instance_id}`). You'll be checked in with again "
+            f"in {NUDGE_INTERVAL_DAYS} days.",
+            ephemeral=True,
+        )
 
-        if keep:
-            db.update_nudge(
-                user_id,
-                instance_id,
-                last_confirmed_at=_utcnow().isoformat(),
-                nudge_sent_at=None,
-                reminder_sent_at=None,
+
+class DeleteInstanceButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"nudge:delete:(?P<instance_id>\d+)",
+):
+    """Per-instance "Delete now" button on a nudge DM."""
+
+    def __init__(self, instance_id: int):
+        super().__init__(
+            discord.ui.Button(
+                style=discord.ButtonStyle.danger,
+                label="Delete now",
+                custom_id=f"nudge:delete:{instance_id}",
             )
+        )
+        self.instance_id = instance_id
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match, /):
+        return cls(int(match["instance_id"]))
+
+    async def callback(self, interaction: discord.Interaction):
+        user_id = str(interaction.user.id)
+        instance = db.get_instance(user_id, self.instance_id)
+        if instance is None:
             await interaction.response.send_message(
-                f"Got it — keeping `{label}` (`{instance_id}`). "
-                f"You'll be checked in with again in {NUDGE_INTERVAL_DAYS} days.",
+                "I no longer track that instance under your account.",
                 ephemeral=True,
             )
-        else:
-            await interaction.response.defer(ephemeral=True, thinking=True)
-            try:
-                akamai_api.delete_instance(instance_id)
-                db.remove_instance(user_id, instance_id)
-                await interaction.followup.send(
-                    f"Deleted `{label}` (`{instance_id}`).",
-                    ephemeral=True,
-                )
-            except Exception as e:
-                await interaction.followup.send(
-                    f"Failed to delete `{label}` (`{instance_id}`): {e}",
-                    ephemeral=True,
-                )
+            return
+
+        label = instance.get("label", "Unknown")
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            akamai_api.delete_instance(self.instance_id)
+            await db.remove_instance(user_id, self.instance_id)
+            await interaction.followup.send(
+                f"Deleted `{label}` (`{self.instance_id}`).",
+                ephemeral=True,
+            )
+        except Exception as e:
+            await interaction.followup.send(
+                f"Failed to delete `{label}` (`{self.instance_id}`): {e}",
+                ephemeral=True,
+            )
 
 
 class RegionSelect(discord.ui.Select):
@@ -706,7 +750,7 @@ class InstanceCreationView(discord.ui.View):
 
             await asyncio.sleep(5)
             updated_instance = akamai_api.get_instance(instance["id"])
-            db.add_instance(str(interaction.user.id), updated_instance)
+            await db.add_instance(str(interaction.user.id), updated_instance)
 
             try:
                 dm_channel = await interaction.user.create_dm()
@@ -806,7 +850,7 @@ class InstanceDeleteView(discord.ui.View):
         try:
             success = akamai_api.delete_instance(self.instance_id)
             if success:
-                db.remove_instance(self.user_id, self.instance_id)
+                await db.remove_instance(self.user_id, self.instance_id)
                 await interaction.followup.send(
                     f"Akamai Cloud instance {self.instance_id} has been deleted successfully."
                 )
@@ -908,18 +952,20 @@ async def create_instance(interaction: discord.Interaction):
 
 @bot.tree.command(
     name="list-instances",
-    description="List your Akamai Cloud instances (auto-refreshed every minute)",
+    description="List your Akamai Cloud instances",
 )
 async def list_instances(interaction: discord.Interaction):
     """Command to list a user's Akamai Cloud instances."""
     await interaction.response.defer(thinking=True)
 
     user_id = str(interaction.user.id)
-    instances = db.get_user_instances(user_id)
-
-    if not instances:
+    if not db.get_user_instances(user_id):
         await interaction.followup.send("You don't have any Akamai Cloud instances.")
         return
+
+    # Refresh from Linode at read time so the listing is current without
+    # needing the periodic refresh loop to fire frequently.
+    instances = await _refresh_instances_for_user(user_id)
 
     embeds = []
     for instance in instances:
@@ -952,7 +998,7 @@ async def list_instances(interaction: discord.Interaction):
             name="Usage check", value=_nudge_status_text(instance), inline=False
         )
 
-        embed.set_footer(text="Instances are automatically refreshed every minute")
+        embed.set_footer(text="Refreshed live from Akamai Cloud")
         embeds.append(embed)
 
     await interaction.followup.send(embeds=embeds[:10])
@@ -1012,28 +1058,27 @@ async def reboot_instance(interaction: discord.Interaction, instance_id: int):
         )
 
 
-def _find_owner_of_instance(instance_id: int) -> Optional[str]:
-    """Return the Discord user_id that owns a tracked instance, or None."""
-    for user_id, instance in db.iter_all_full():
-        if instance.get("id") == instance_id:
-            return user_id
-    return None
-
-
 async def _import_instance_for_user(user_id: str, instance_id: int) -> Dict[str, Any]:
     """Fetch the live Linode instance and add it to the DB under user_id.
 
     Raises ValueError if it's already tracked (by anyone) or doesn't exist.
+    Uses Database.import_instance for atomic uniqueness checking so two
+    concurrent /import-instance calls can't both succeed for the same id.
     """
-    existing_owner = _find_owner_of_instance(instance_id)
-    if existing_owner is not None:
+    existing = db.find_owner_of_instance(instance_id)
+    if existing is not None:
         raise ValueError(
-            f"Instance {instance_id} is already tracked under user {existing_owner}."
+            f"Instance {instance_id} is already tracked under user {existing}."
         )
 
     # Will raise on 404/etc. — caller surfaces the message.
     live = akamai_api.get_instance(instance_id)
-    db.add_instance(user_id, live)
+    added = await db.import_instance(user_id, live)
+    if not added:
+        owner = db.find_owner_of_instance(instance_id) or "another user"
+        raise ValueError(
+            f"Instance {instance_id} is already tracked under user {owner}."
+        )
     return live
 
 
@@ -1116,7 +1161,7 @@ async def keep_instance(interaction: discord.Interaction, instance_id: int):
         )
         return
 
-    db.update_nudge(
+    await db.update_nudge(
         user_id,
         instance_id,
         last_confirmed_at=_utcnow().isoformat(),
@@ -1162,7 +1207,7 @@ async def admin_extend(
         return
 
     new_confirmed = _utcnow() + datetime.timedelta(days=days - NUDGE_INTERVAL_DAYS)
-    db.update_nudge(
+    await db.update_nudge(
         user_id,
         instance_id,
         last_confirmed_at=new_confirmed.isoformat(),
@@ -1203,7 +1248,7 @@ async def admin_exempt(
         )
         return
 
-    db.update_nudge(user_id, instance_id, exempt=exempt)
+    await db.update_nudge(user_id, instance_id, exempt=exempt)
     state = "exempt" if exempt else "not exempt"
     await interaction.response.send_message(
         f"`{instance.get('label')}` (`{instance_id}`) is now **{state}** from auto-cleanup.",
