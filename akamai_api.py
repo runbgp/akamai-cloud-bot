@@ -4,12 +4,12 @@ from typing import Dict, List, Any
 
 
 class AkamaiCloudAPI:
-    """Class to interact with the Akamai Cloud API."""
+    """Call the Akamai Cloud API."""
 
     BASE_URL = "https://api.linode.com/v4"
 
     def __init__(self, api_token: str = None):
-        """Initialize the AkamaiCloudAPI class with an API token."""
+        """Initialize the client with an API token."""
         self.api_token = api_token or os.getenv("AKAMAI_API_TOKEN")
         if not self.api_token:
             raise ValueError("Akamai Cloud API token is required")
@@ -20,19 +20,19 @@ class AkamaiCloudAPI:
         }
 
     def get_regions(self) -> List[Dict[str, Any]]:
-        """Get available Akamai Cloud regions."""
+        """Return the available Akamai Cloud regions."""
         response = requests.get(f"{self.BASE_URL}/regions", headers=self.headers)
         response.raise_for_status()
         return response.json().get("data", [])
 
     def get_images(self) -> List[Dict[str, Any]]:
-        """Get available Akamai Cloud images (OS options)."""
+        """Return the available operating-system images."""
         response = requests.get(f"{self.BASE_URL}/images", headers=self.headers)
         response.raise_for_status()
         return response.json().get("data", [])
 
     def get_instance_types(self) -> List[Dict[str, Any]]:
-        """Get available Akamai Cloud instance types."""
+        """Return the available instance types."""
         response = requests.get(f"{self.BASE_URL}/linode/types", headers=self.headers)
         response.raise_for_status()
         return response.json().get("data", [])
@@ -46,17 +46,17 @@ class AkamaiCloudAPI:
         type: str = "g6-nanode-1",
     ) -> Dict[str, Any]:
         """
-        Create a new Akamai Cloud instance.
+        Create an Akamai Cloud instance.
 
         Args:
-            label: A unique label for the instance
-            region: The region ID (e.g., 'us-east')
-            image: The image ID (e.g., 'linode/ubuntu20.04')
-            root_pass: The root password for the instance
-            type: The instance type (default: g6-nanode-1)
+            label: This value is the unique instance label.
+            region: This value is the region ID, for example, 'us-east'.
+            image: This value is the image ID, for example, 'linode/ubuntu20.04'.
+            root_pass: This value is the root password.
+            type: This value is the instance type. The default is g6-nanode-1.
 
         Returns:
-            Dict containing the created instance details
+            The method returns the new instance data in a dictionary.
         """
         payload = {
             "label": label,
@@ -74,7 +74,7 @@ class AkamaiCloudAPI:
         return response.json()
 
     def get_instances(self) -> List[Dict[str, Any]]:
-        """Get all Akamai Cloud instances."""
+        """Return all Akamai Cloud instances."""
         response = requests.get(
             f"{self.BASE_URL}/linode/instances", headers=self.headers
         )
@@ -82,7 +82,7 @@ class AkamaiCloudAPI:
         return response.json().get("data", [])
 
     def get_instance(self, instance_id: int) -> Dict[str, Any]:
-        """Get details for a specific Akamai Cloud instance."""
+        """Return one Akamai Cloud instance."""
         response = requests.get(
             f"{self.BASE_URL}/linode/instances/{instance_id}", headers=self.headers
         )

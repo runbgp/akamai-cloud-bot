@@ -24,7 +24,7 @@ venv.bak/
 # VS Code
 .vscode/
 
-# Byte-compiled / optimized / DLL files
+# Python bytecode
 __pycache__/
 *.py[cod]
 *$py.class

@@ -1,7 +1,7 @@
 [project]
 name = "akamai-cloud-bot"
 version = "0.1.0"
-description = "A Discord bot for managing Akamai Cloud instances"
+description = "A Discord bot that manages Akamai Cloud instances"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [

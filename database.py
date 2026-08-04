@@ -5,7 +5,7 @@ import datetime
 from contextlib import asynccontextmanager
 from typing import Dict, List, Optional, Any
 
-# Keys we manage on top of the raw Linode instance dict.
+# Keys for bot-managed data.
 NUDGE_KEY = "_nudge"
 META_KEY = "_meta"
 
@@ -26,46 +26,39 @@ def _default_nudge() -> Dict[str, Any]:
 
 
 class Database:
-    """JSON-backed store for per-user Akamai Cloud instances and nudge state.
+    """Store Akamai Cloud instances and cleanup state in a JSON file.
 
-    The on-disk layout is one of:
+    The file supports these layouts:
 
       Legacy: {user_id: [instance, ...]}
       Current: {"_meta": {...}, "users": {user_id: [instance, ...]}}
 
-    Legacy files are migrated on first read.
+    The first read converts the legacy layout.
 
-    Mutating methods are async and serialize through `self._lock` so that
-    concurrent tasks (the auto-refresh loop, the nudge loop, button clicks,
-    slash commands) can't clobber each other's read-modify-write cycles.
-    Read methods stay sync — they take a single snapshot, which is atomic
-    on a single-threaded asyncio loop.
+    Public methods that change data use `self._lock`. This lock prevents concurrent tasks from overwriting changes.
+
+    Read methods use one snapshot. This read is atomic on the single-threaded event loop.
     """
 
     def __init__(self, db_file: str = "akamai_instances.json"):
         self.db_file = db_file
         self._ensure_db_exists()
-        # Constructed eagerly; asyncio.Lock binds to the running loop on first
-        # acquire, so it's safe to instantiate here at import time.
+        # The lock binds to the active event loop on its first use.
         self._lock = asyncio.Lock()
 
     @asynccontextmanager
     async def transaction(self):
-        """Hold the DB lock across multiple operations.
+        """Hold the database lock across related operations.
 
-        Use this when a logical operation reads, decides, then writes — and
-        another writer racing in between would produce an inconsistent
-        result. Methods called *inside* a `transaction()` block must use the
-        `_locked` private variants (or call back through the public methods
-        only if the lock is reentrant — it isn't, so prefer `_locked`).
+        If an operation must read and then write atomically, use this context manager.
+
+        Inside a `transaction()` block, call only the private `_locked` methods. The lock is not reentrant.
         """
         async with self._lock:
             yield
 
     def _ensure_db_exists(self):
-        # Treat both "missing" and "exists but empty" as needing initialization —
-        # `docker run` with a bind mount to a non-existent host file creates an
-        # empty file, which would otherwise crash json.load on first read.
+        # Initialize missing or empty files. A bind mount can create an empty file.
         if not os.path.exists(self.db_file) or os.path.getsize(self.db_file) == 0:
             with open(self.db_file, "w") as f:
                 json.dump({"_meta": {}, "users": {}}, f)
@@ -75,7 +68,7 @@ class Database:
             data = json.load(f)
 
         if "users" not in data:
-            # Legacy layout: top-level keys are user IDs.
+            # Convert the legacy layout with user IDs at the top level.
             data = {"_meta": {}, "users": data}
         data.setdefault("_meta", {})
         data.setdefault("users", {})
@@ -85,7 +78,7 @@ class Database:
         with open(self.db_file, "w") as f:
             json.dump(data, f, indent=2)
 
-    # ----- meta (bot-wide) -----
+    # Bot metadata
 
     def get_meta(self) -> Dict[str, Any]:
         return self._read_db().get("_meta", {})
@@ -96,14 +89,12 @@ class Database:
             data["_meta"].update(kwargs)
             self._write_db(data)
 
-    # ----- instances -----
+    # Instances
 
     async def add_instance(self, user_id: str, instance_data: Dict[str, Any]):
-        """Upsert an instance under user_id (no cross-user uniqueness check).
+        """Add or replace an instance for `user_id`.
 
-        Used by the create flow where we know the VM was just created and
-        can't already be tracked anywhere. For user-driven imports use
-        `import_instance` instead.
+        This method does not enforce cross-user uniqueness. Use `import_instance` for user imports.
         """
         async with self._lock:
             self._add_instance_locked(user_id, instance_data)
@@ -129,9 +120,9 @@ class Database:
     async def import_instance(
         self, user_id: str, instance_data: Dict[str, Any]
     ) -> bool:
-        """Atomically add an instance only if no user already tracks its id.
+        """If no user tracks the instance ID, add the instance.
 
-        Returns True if added, False if it was already tracked under any user.
+        Return `True` after an add. If a user already tracks the instance, return `False`.
         """
         async with self._lock:
             data = self._read_db()
@@ -159,7 +150,7 @@ class Database:
         return None
 
     def find_owner_of_instance(self, instance_id: int) -> Optional[str]:
-        """Return the user_id tracking the given instance, or None."""
+        """Return the user ID that tracks the instance, or `None`."""
         for user_id, instances in self._read_db()["users"].items():
             for inst in instances:
                 if inst.get("id") == instance_id:
@@ -183,7 +174,7 @@ class Database:
     async def update_instance(
         self, user_id: str, instance_id: int, instance_data: Dict[str, Any]
     ) -> bool:
-        """Replace the raw Linode fields but preserve our nudge metadata."""
+        """Replace the Linode fields and keep the cleanup metadata."""
         async with self._lock:
             data = self._read_db()
             users = data["users"]
@@ -209,12 +200,12 @@ class Database:
         return all_instances
 
     def iter_all_full(self):
-        """Yield (user_id, instance_dict) for every stored instance."""
+        """Yield the user ID and data for each stored instance."""
         for user_id, instances in self._read_db()["users"].items():
             for instance in instances:
                 yield user_id, instance
 
-    # ----- nudge state -----
+    # Cleanup state
 
     async def update_nudge(
         self, user_id: str, instance_id: int, **fields

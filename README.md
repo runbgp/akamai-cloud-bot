@@ -1,61 +1,79 @@
 # Akamai Cloud Bot
 
-A Discord bot that allows users to create, check the status of, and delete Akamai Cloud instances using the Akamai Cloud API.
+Akamai Cloud Bot manages Akamai Cloud instances through Discord and the Linode API.
 
 ## Features
 
-- Create Akamai Cloud instances with custom configurations
-- Check the status of your Akamai Cloud instances
-- Delete your Akamai Cloud instances
-- User-specific instance tracking
-- Automatic instance status refresh every minute
-- Weekly "still using this VM?" nudges with auto-deletion if the user doesn't confirm
+- Creates instances with a selected region, image, and type.
+- Lists, reboots, imports, and deletes instances.
+- Tracks the instances for each Discord user.
+- Refreshes instance data from Linode.
+- Sends regular usage checks and deletes unconfirmed instances.
 
-## Setup
+## Set up the bot
 
-1. Clone this repository
-2. Install uv (Python package manager):
+1. Clone this repository.
+2. Install `uv`.
+
    ```
    curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
-3. Install dependencies:
+
+3. Install the dependencies.
+
    ```
    uv sync
    ```
-4. Create a `.env` file with the following variables:
+
+4. Create a `.env` file with these required values.
+
    ```
    DISCORD_TOKEN=your_discord_bot_token
    AKAMAI_API_TOKEN=your_akamai_cloud_api_token
    ```
-5. Run the bot:
+
+5. Run the bot.
+
    ```
    uv run akamai_cloud_bot.py
    ```
 
 ## Commands
 
-- `/create-instance` - Create a new Akamai Cloud instance
-- `/list-instances` - List your Akamai Cloud instances (auto-refreshed every minute)
-- `/delete-instance` - Delete an Akamai Cloud instance
-- `/reboot-instance` - Reboot an Akamai Cloud instance
-- `/keep-instance` - Confirm you're still using a VM (resets the auto-cleanup clock; fallback for missed DM nudges)
-- `/import-instance <instance_id>` - Track an existing Akamai Cloud VM you own (one created manually, or that fell out of the bot's database) under your Discord account
+| Command | Function |
+|---|---|
+| `/create-instance` | Creates an Akamai Cloud instance. |
+| `/list-instances` | Lists your instances and refreshes their data. |
+| `/delete-instance` | Deletes an instance. |
+| `/reboot-instance` | Reboots an instance. |
+| `/keep-instance` | Confirms that you still use an instance and resets its cleanup timer. |
+| `/import-instance <instance_id>` | Adds an existing instance that you own to your account. |
 
-Admin-only (requires the user's Discord ID in `ADMIN_USER_IDS`):
+The following commands require the Discord user ID in `ADMIN_USER_IDS`:
 
-- `/admin-extend <user_id> <instance_id> <days>` - Push the next usage check out
-- `/admin-exempt <user_id> <instance_id> <true|false>` - Toggle a VM's exemption from auto-cleanup
-- `/admin-list-all` - List every tracked instance and its nudge state
-- `/admin-import-instance <user_id> <instance_id>` - Track an existing VM under another user's account
+| Command | Function |
+|---|---|
+| `/admin-extend <user_id> <instance_id> <days>` | Delays the next usage check. |
+| `/admin-exempt <user_id> <instance_id> <true\|false>` | Enables or disables automatic cleanup for an instance. |
+| `/admin-list-all` | Lists all tracked instances and their cleanup status. |
+| `/admin-import-instance <user_id> <instance_id>` | Adds an existing instance to another user account. |
 
-## Auto-cleanup
+## Automatic cleanup
 
-Every `NUDGE_INTERVAL_DAYS` (default 7) the bot DMs each VM owner asking
-whether they're still using the instance. The DM has **Keep it** and **Delete now**
-buttons. If no confirmation arrives within `NUDGE_GRACE_DAYS` (default 2 — with one
-reminder DM 1 day before the deadline), the VM is deleted automatically.
+The bot sends each owner a direct message every `NUDGE_INTERVAL_DAYS`. The default interval is 7 days.
 
-If the bot was offline when a grace window would have expired, the window is
-extended by the duration of the outage so users aren't punished for downtime.
-Tuning happens via `NUDGE_INTERVAL_DAYS`, `NUDGE_GRACE_DAYS`, `NUDGE_REMINDER_DAYS`,
-`NUDGE_CHECK_HOURS`, and (optionally) a hard `MAX_LIFETIME_DAYS` cap.
+Each message has **Keep it** and **Delete now** buttons. The bot deletes the instance after `NUDGE_GRACE_DAYS` without confirmation.
+
+The default grace period is 2 days. The bot sends one reminder `NUDGE_REMINDER_DAYS` before the deadline.
+
+If the bot was offline, it extends each pending grace period by the outage duration. This extension prevents deletion during an outage.
+
+The following variables control automatic cleanup:
+
+- `NUDGE_INTERVAL_DAYS`
+- `NUDGE_GRACE_DAYS`
+- `NUDGE_REMINDER_DAYS`
+- `NUDGE_CHECK_HOURS`
+- `MAX_LIFETIME_DAYS`
+
+`MAX_LIFETIME_DAYS` sets an optional maximum instance age. A value of `0` disables this limit.

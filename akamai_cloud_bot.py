@@ -12,35 +12,32 @@ import datetime
 from akamai_api import AkamaiCloudAPI
 from database import Database
 
-# Load environment variables
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-# Nudge configuration (overridable via env)
+# Cleanup configuration
 NUDGE_INTERVAL_DAYS = int(os.getenv("NUDGE_INTERVAL_DAYS", "7"))
 NUDGE_GRACE_DAYS = int(os.getenv("NUDGE_GRACE_DAYS", "2"))
-NUDGE_REMINDER_DAYS = int(os.getenv("NUDGE_REMINDER_DAYS", "1"))  # before grace ends
+NUDGE_REMINDER_DAYS = int(os.getenv("NUDGE_REMINDER_DAYS", "1"))
 NUDGE_CHECK_HOURS = int(os.getenv("NUDGE_CHECK_HOURS", "1"))
-# Hard ceiling on instance lifetime regardless of confirmations. 0 = disabled.
+# A value of zero disables the lifetime limit.
 MAX_LIFETIME_DAYS = int(os.getenv("MAX_LIFETIME_DAYS", "0"))
 
 ADMIN_USER_IDS = {
     s.strip() for s in os.getenv("ADMIN_USER_IDS", "").split(",") if s.strip()
 }
 
-# Initialize bot with intents
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# Initialize Akamai Cloud API and Database
 akamai_api = AkamaiCloudAPI()
 db = Database()
 
-# Cache for regions, images, and types
+# API data for the selection menus
 cache = {"regions": [], "images": [], "types": []}
 
-# Set on first nudge tick after startup so we extend grace by any downtime.
+# The first cleanup pass uses this value to compensate for downtime.
 _downtime_extension_seconds: Optional[float] = None
 
 
@@ -52,7 +49,7 @@ def _parse_iso(value: Optional[str]) -> Optional[datetime.datetime]:
     if not value:
         return None
     try:
-        # `fromisoformat` handles both `+00:00` and naive ISO strings.
+        # Accept ISO values with or without a time zone.
         dt = datetime.datetime.fromisoformat(value)
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
@@ -67,16 +64,16 @@ def is_admin(user_id: str) -> bool:
 
 @bot.event
 async def on_ready():
-    """Event triggered when the bot is ready."""
+    """Start Discord resources and background tasks."""
     print(f"{bot.user.name} is connected to Discord!")
 
-    # Compute downtime so the first nudge tick can extend grace windows.
+    # Measure downtime before the cleanup task starts.
     global _downtime_extension_seconds
     meta = db.get_meta()
     last_seen = _parse_iso(meta.get("last_seen_at"))
     if last_seen is not None:
         gap = (_utcnow() - last_seen).total_seconds()
-        # Ignore tiny gaps (normal restarts) — only extend for real outages.
+        # Ignore restart gaps of 5 minutes or less.
         _downtime_extension_seconds = gap if gap > 300 else 0.0
         if _downtime_extension_seconds:
             print(
@@ -86,13 +83,9 @@ async def on_ready():
     else:
         _downtime_extension_seconds = 0.0
 
-    # Register persistent dynamic items so per-instance DM buttons survive
-    # restarts. Each nudge DM gets a fresh View whose Keep/Delete buttons
-    # encode the instance_id in their custom_id; clicks resolve through the
-    # template regex on the dynamic items below.
+    # Register dynamic items so old direct-message buttons work after a restart.
     bot.add_dynamic_items(KeepInstanceButton, DeleteInstanceButton)
 
-    # Sync commands with Discord
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} command(s)")
@@ -118,7 +111,7 @@ async def on_ready():
 
 
 async def update_cache():
-    """Update the cache with Akamai Cloud API data."""
+    """Refresh the cached Akamai Cloud API data."""
     try:
         cache["regions"] = akamai_api.get_regions()
         cache["images"] = akamai_api.get_images()
@@ -133,12 +126,11 @@ REFRESH_INTERVAL_MINUTES = int(os.getenv("REFRESH_INTERVAL_MINUTES", "10"))
 
 @tasks.loop(minutes=REFRESH_INTERVAL_MINUTES)
 async def auto_refresh_instances():
-    """Periodically resync stored Linode state.
+    """Refresh stored instances from Linode.
 
-    Most instance state changes (status, IPs) are also picked up at read time
-    by `/list-instances` via `_refresh_instances_for_user`, so this loop only
-    needs to be a low-frequency backstop. Default 10 minutes; tune via
-    `REFRESH_INTERVAL_MINUTES`.
+    `/list-instances` also calls `_refresh_instances_for_user` before it displays data.
+
+    This background task keeps inactive data current. `REFRESH_INTERVAL_MINUTES` sets its interval.
     """
     try:
         all_instances = db.get_all_instances()
@@ -166,9 +158,9 @@ async def auto_refresh_instances():
 
 
 async def _refresh_instances_for_user(user_id: str) -> list:
-    """Resync the user's instances from Linode and return the fresh list.
+    """Refresh the instance list for a user and return it.
 
-    Per-instance failures are logged but don't break the listing.
+    Log a failed refresh and keep the stored instance.
     """
     fresh = []
     for instance in db.get_user_instances(user_id):
@@ -190,7 +182,7 @@ async def before_auto_refresh():
 
 @tasks.loop(minutes=5)
 async def heartbeat_meta():
-    """Persist last-seen time so we can detect downtime on next boot."""
+    """Save the time that the bot was last active."""
     await db.set_meta(last_seen_at=_utcnow().isoformat())
 
 
@@ -201,10 +193,10 @@ async def before_heartbeat():
 
 @tasks.loop(hours=NUDGE_CHECK_HOURS)
 async def check_nudges():
-    """Walk every stored instance and send/reminder/delete as needed."""
+    """Process automatic cleanup for all stored instances."""
     global _downtime_extension_seconds
     extension = datetime.timedelta(seconds=_downtime_extension_seconds or 0.0)
-    # Only extend windows once per startup.
+    # Apply the downtime extension once.
     _downtime_extension_seconds = 0.0
 
     now = _utcnow()
@@ -234,7 +226,7 @@ async def check_nudges():
 @check_nudges.before_loop
 async def before_check_nudges():
     await bot.wait_until_ready()
-    # Stagger so we don't collide with auto_refresh on startup.
+    # Delay this task to separate the startup API calls.
     await asyncio.sleep(30)
 
 
@@ -255,7 +247,6 @@ async def _process_one_nudge(
     last_confirmed = _parse_iso(nudge.get("last_confirmed_at")) or now
     nudge_sent = _parse_iso(nudge.get("nudge_sent_at"))
 
-    # Hard lifetime cap.
     if max_lifetime is not None:
         created_at = _parse_iso(instance.get("created"))
         if created_at and (now - created_at) > max_lifetime:
@@ -266,13 +257,12 @@ async def _process_one_nudge(
             )
             return
 
-    # No active nudge — should we start one?
     if nudge_sent is None:
         if (now - last_confirmed) >= interval:
             await _send_nudge(user_id, instance, kind="initial")
         return
 
-    # Active nudge: extend by detected downtime once, then evaluate.
+    # Add downtime before calculating the grace period.
     effective_sent = nudge_sent + extension
     elapsed = now - effective_sent
 
@@ -306,7 +296,7 @@ def _instance_summary_lines(instance: Dict[str, Any]) -> str:
 
 
 async def _send_nudge(user_id: str, instance: Dict[str, Any], kind: str):
-    """DM the owner with Keep / Delete buttons."""
+    """Send the owner a direct message with cleanup controls."""
     instance_id = instance.get("id")
     try:
         user = await bot.fetch_user(int(user_id))
@@ -390,13 +380,13 @@ async def _force_delete(user_id: str, instance: Dict[str, Any], reason: str):
 
 
 def generate_password(length=16):
-    """Generate a secure random password."""
+    """Generate a random password."""
     chars = string.ascii_letters + string.digits + "!@#$%^&*()_-+=<>?"
     return "".join(random.choice(chars) for _ in range(length))
 
 
 def get_country_flag(country_code):
-    """Convert a country code to a flag emoji."""
+    """Convert a country code to a flag symbol."""
     if not country_code or len(country_code) != 2:
         return "🌐"
 
@@ -410,11 +400,9 @@ class KeepInstanceButton(
     discord.ui.DynamicItem[discord.ui.Button],
     template=r"nudge:keep:(?P<instance_id>\d+)",
 ):
-    """Per-instance "Keep it" button on a nudge DM.
+    """Represent the "Keep it" button for one instance.
 
-    The instance_id is encoded in the custom_id, so clicks resolve to the
-    exact VM the message is about even if the bot restarted between send
-    and click.
+    The `custom_id` contains the instance ID. Discord can resolve a click after the bot restarts.
     """
 
     def __init__(self, instance_id: int):
@@ -460,7 +448,7 @@ class DeleteInstanceButton(
     discord.ui.DynamicItem[discord.ui.Button],
     template=r"nudge:delete:(?P<instance_id>\d+)",
 ):
-    """Per-instance "Delete now" button on a nudge DM."""
+    """Represent the "Delete now" button for one instance."""
 
     def __init__(self, instance_id: int):
         super().__init__(
@@ -503,7 +491,7 @@ class DeleteInstanceButton(
 
 
 class RegionSelect(discord.ui.Select):
-    """Dropdown for selecting an Akamai Cloud region."""
+    """Select an Akamai Cloud region."""
 
     def __init__(self, regions):
         if not regions:
@@ -559,7 +547,7 @@ class RegionSelect(discord.ui.Select):
 
 
 class ImageSelect(discord.ui.Select):
-    """Dropdown for selecting an Akamai Cloud instance image (OS)."""
+    """Select an operating-system image."""
 
     def __init__(self, images):
         if not images:
@@ -621,7 +609,7 @@ class ImageSelect(discord.ui.Select):
 
 
 class TypeSelect(discord.ui.Select):
-    """Dropdown for selecting an Akamai Cloud instance type."""
+    """Select an Akamai Cloud instance type."""
 
     def __init__(self, types):
         if not types:
@@ -670,7 +658,7 @@ class TypeSelect(discord.ui.Select):
 
 
 class InstanceCreationView(discord.ui.View):
-    """View for creating an Akamai Cloud instance."""
+    """Collect the values for a new instance."""
 
     def __init__(self, user_id: str):
         super().__init__(timeout=300)
@@ -828,7 +816,7 @@ class InstanceCreationView(discord.ui.View):
 
 
 class InstanceDeleteView(discord.ui.View):
-    """View for confirming Akamai Cloud instance deletion."""
+    """Request confirmation for an instance deletion."""
 
     def __init__(self, user_id: str, instance_id: int):
         super().__init__(timeout=60)
@@ -888,7 +876,7 @@ class InstanceDeleteView(discord.ui.View):
 
 
 def _nudge_status_text(instance: Dict[str, Any]) -> str:
-    """Human-readable line for /list-instances showing where the VM stands."""
+    """Return the cleanup status for `/list-instances`."""
     nudge = instance.get("_nudge") or {}
     if nudge.get("exempt"):
         return "✅ Exempt from auto-cleanup."
@@ -912,7 +900,7 @@ def _nudge_status_text(instance: Dict[str, Any]) -> str:
     name="create-instance", description="Create a new Akamai Cloud instance"
 )
 async def create_instance(interaction: discord.Interaction):
-    """Command to create a new Akamai Cloud instance."""
+    """Create an Akamai Cloud instance."""
     await interaction.response.defer(thinking=True)
 
     if not cache["regions"] or not cache["images"] or not cache["types"]:
@@ -955,7 +943,7 @@ async def create_instance(interaction: discord.Interaction):
     description="List your Akamai Cloud instances",
 )
 async def list_instances(interaction: discord.Interaction):
-    """Command to list a user's Akamai Cloud instances."""
+    """List the Akamai Cloud instances for a user."""
     await interaction.response.defer(thinking=True)
 
     user_id = str(interaction.user.id)
@@ -963,8 +951,7 @@ async def list_instances(interaction: discord.Interaction):
         await interaction.followup.send("You don't have any Akamai Cloud instances.")
         return
 
-    # Refresh from Linode at read time so the listing is current without
-    # needing the periodic refresh loop to fire frequently.
+    # Refresh now so the list does not depend on the background task.
     instances = await _refresh_instances_for_user(user_id)
 
     embeds = []
@@ -1007,7 +994,7 @@ async def list_instances(interaction: discord.Interaction):
 @bot.tree.command(name="delete-instance", description="Delete an Akamai Cloud instance")
 @app_commands.describe(instance_id="The ID of the Akamai Cloud instance to delete")
 async def delete_instance(interaction: discord.Interaction, instance_id: int):
-    """Command to delete an Akamai Cloud instance."""
+    """Delete an Akamai Cloud instance."""
     await interaction.response.defer(thinking=True)
 
     user_id = str(interaction.user.id)
@@ -1034,7 +1021,7 @@ async def delete_instance(interaction: discord.Interaction, instance_id: int):
 @bot.tree.command(name="reboot-instance", description="Reboot an Akamai Cloud instance")
 @app_commands.describe(instance_id="The ID of the Akamai Cloud instance to reboot")
 async def reboot_instance(interaction: discord.Interaction, instance_id: int):
-    """Command to reboot an Akamai Cloud instance."""
+    """Reboot an Akamai Cloud instance."""
     await interaction.response.defer(thinking=True)
 
     user_id = str(interaction.user.id)
@@ -1059,11 +1046,11 @@ async def reboot_instance(interaction: discord.Interaction, instance_id: int):
 
 
 async def _import_instance_for_user(user_id: str, instance_id: int) -> Dict[str, Any]:
-    """Fetch the live Linode instance and add it to the DB under user_id.
+    """Get a Linode instance and add it to a user account.
 
-    Raises ValueError if it's already tracked (by anyone) or doesn't exist.
-    Uses Database.import_instance for atomic uniqueness checking so two
-    concurrent /import-instance calls can't both succeed for the same id.
+    If a user already tracks the instance, raise `ValueError`. API errors pass to the caller.
+
+    `Database.import_instance` uses one lock for the uniqueness decision and the add.
     """
     existing = db.find_owner_of_instance(instance_id)
     if existing is not None:
@@ -1071,7 +1058,7 @@ async def _import_instance_for_user(user_id: str, instance_id: int) -> Dict[str,
             f"Instance {instance_id} is already tracked under user {existing}."
         )
 
-    # Will raise on 404/etc. — caller surfaces the message.
+    # The caller reports API errors.
     live = akamai_api.get_instance(instance_id)
     added = await db.import_instance(user_id, live)
     if not added:
@@ -1177,7 +1164,7 @@ async def keep_instance(interaction: discord.Interaction, instance_id: int):
     )
 
 
-# ----- admin commands -----
+# Admin commands
 
 
 @bot.tree.command(
