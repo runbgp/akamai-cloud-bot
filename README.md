@@ -84,8 +84,8 @@ Dependabot proposes weekly Python updates through its `uv` integration, alongsid
 the existing Docker and GitHub Actions updates. Python update PRs carry the
 `dependencies` label for [Depkeeper](https://github.com/runbgp/depkeeper).
 
-Depkeeper's configuration is prepared in review-only mode. Its GitHub deployment
-remains disabled until a dedicated GitHub App is configured. It installs the
+Depkeeper runs in review-only mode through the `runbgp-depkeeper` GitHub App.
+Its repository-scoped token cannot push or merge. It installs the
 locked environment and compiles the three application modules in disposable
 workers; it does not start the bot or receive Discord or Akamai credentials.
 These checks do not replace behavioral tests. Automatic repairs and merges stay
