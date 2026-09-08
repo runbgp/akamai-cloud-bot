@@ -1,5 +1,10 @@
 # AGENTS.md
 
+Dependency updates use Dependabot's `uv` ecosystem. External reviewer source is
+in `runbgp/depkeeper`; deployment policy is in `runbgp/docker-compose`.
+Depkeeper is configured for review only and awaits GitHub App credentials.
+Do not run the live cloud bot to verify dependency updates.
+
 When you change code in this repository, use these instructions.
 
 ## Commands

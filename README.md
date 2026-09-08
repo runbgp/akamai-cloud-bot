@@ -77,3 +77,16 @@ The following variables control automatic cleanup:
 - `MAX_LIFETIME_DAYS`
 
 `MAX_LIFETIME_DAYS` sets an optional maximum instance age. A value of `0` disables this limit.
+
+## Dependency review
+
+Dependabot proposes weekly Python updates through its `uv` integration, alongside
+the existing Docker and GitHub Actions updates. Python update PRs carry the
+`dependencies` label for [Depkeeper](https://github.com/runbgp/depkeeper).
+
+Depkeeper's configuration is prepared in review-only mode. Its GitHub deployment
+remains disabled until a dedicated GitHub App is configured. It installs the
+locked environment and compiles the three application modules in disposable
+workers; it does not start the bot or receive Discord or Akamai credentials.
+These checks do not replace behavioral tests. Automatic repairs and merges stay
+off until meaningful PR tests and branch protection are in place.

@@ -1,5 +1,13 @@
 version: 2
 updates:
+  - package-ecosystem: "uv"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+    assignees:
+      - "runbgp"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
