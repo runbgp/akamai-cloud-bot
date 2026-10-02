@@ -5,6 +5,7 @@ from discord.ext import commands, tasks
 from dotenv import load_dotenv
 import asyncio
 import random
+import re
 import string
 from typing import Dict, Optional, Any
 import datetime
@@ -36,6 +37,7 @@ db = Database()
 
 # API data for the selection menus
 cache = {"regions": [], "images": [], "types": []}
+DEFAULT_IMAGE_ID = "linode/ubuntu26.04"
 
 # The first cleanup pass uses this value to compensate for downtime.
 _downtime_extension_seconds: Optional[float] = None
@@ -559,42 +561,51 @@ class ImageSelect(discord.ui.Select):
             )
             return
 
+        # LKE/KPP images share the base OS vendor and public-image flags.
+        # Accept only standard distribution IDs, without specialized suffixes.
         public_images = [
             img
             for img in images
-            if img.get("is_public", False) and not img.get("deprecated", True)
+            if img.get("is_public", False)
+            and not img.get("deprecated", True)
+            and img.get("status") == "available"
+            and not img.get("is_product_image", False)
+            and re.fullmatch(
+                r"linode/(?:ubuntu\d+\.\d+|debian\d+|almalinux\d+|fedora\d+|alpine\d+\.\d+)",
+                img.get("id", ""),
+            )
         ]
 
         priority_vendors = ["Ubuntu", "Debian", "AlmaLinux", "Fedora", "Alpine"]
 
-        ubuntu_24_04_id = "linode/ubuntu24.04"
-        ubuntu_24_04_image = next(
-            (img for img in public_images if img.get("id") == ubuntu_24_04_id), None
+        default_image = next(
+            (img for img in public_images if img.get("id") == DEFAULT_IMAGE_ID), None
         )
 
         final_images = []
-        if ubuntu_24_04_image:
-            final_images.append(ubuntu_24_04_image)
+        if default_image:
+            final_images.append(default_image)
 
         for vendor in priority_vendors:
             vendor_images = [
                 img
                 for img in public_images
-                if img.get("vendor") == vendor and img.get("id") != ubuntu_24_04_id
+                if img.get("vendor") == vendor and img.get("id") != DEFAULT_IMAGE_ID
             ]
-            vendor_images.sort(key=lambda x: x.get("label", ""), reverse=True)
+            vendor_images.sort(
+                key=lambda img: tuple(map(int, re.findall(r"\d+", img["id"]))),
+                reverse=True,
+            )
             final_images.extend(vendor_images[:3])
             if len(final_images) >= 20:
                 break
 
         options = [
             discord.SelectOption(
-                label=f"{img.get('vendor', 'Unknown')} - {img.get('label', 'Unknown')}"[
-                    :100
-                ],
+                label=img.get("label", "Unknown")[:100],
                 value=img.get("id", "unknown"),
                 description=(img.get("description", "") or "")[:100],
-                default=(img.get("id") == ubuntu_24_04_id),
+                default=(img.get("id") == DEFAULT_IMAGE_ID),
             )
             for img in final_images[:25]
             if img
@@ -664,12 +675,16 @@ class InstanceCreationView(discord.ui.View):
         super().__init__(timeout=300)
         self.user_id = user_id
         self.region = None
-        self.image = "linode/ubuntu24.04"
+        self.image = None
         self.type = "g6-nanode-1"
 
         self.region_select = RegionSelect(cache["regions"])
         self.image_select = ImageSelect(cache["images"])
         self.type_select = TypeSelect(cache["types"])
+        self.image = next(
+            (option.value for option in self.image_select.options if option.default),
+            None,
+        )
 
         self.add_item(self.region_select)
         self.add_item(self.image_select)
@@ -719,6 +734,14 @@ class InstanceCreationView(discord.ui.View):
         if not self.region:
             await interaction.response.send_message(
                 "Please select a region first!", ephemeral=True
+            )
+            return
+
+        if self.image == "none" or not any(
+            option.value == self.image for option in self.image_select.options
+        ):
+            await interaction.response.send_message(
+                "Please select an available operating system first!", ephemeral=True
             )
             return
 
@@ -914,9 +937,17 @@ async def create_instance(interaction: discord.Interaction):
         color=discord.Color.blue(),
     )
 
+    default_image_label = next(
+        (option.label for option in view.image_select.options if option.default),
+        "Please select an operating system",
+    )
     embed.add_field(
         name="Default Selections",
-        value="• **Image:** Ubuntu 24.04 LTS (pre-selected)\n• **Type:** Nanode 1GB (pre-selected)\n• **Region:** Please select a region",
+        value=(
+            f"• **Image:** {default_image_label}\n"
+            "• **Type:** Nanode 1GB (pre-selected)\n"
+            "• **Region:** Please select a region"
+        ),
         inline=False,
     )
 

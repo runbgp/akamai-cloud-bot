@@ -139,11 +139,16 @@ Preserve this behavior unless the task changes the security model.
 
 ### Selection limits
 
-`RegionSelect`, `ImageSelect`, and `TypeSelect` contain priority lists. The default image is `linode/ubuntu24.04`.
+`RegionSelect`, `ImageSelect`, and `TypeSelect` contain priority lists. The default image is `linode/ubuntu26.04`.
 
 The default type is `g6-nanode-1`. Discord limits each selection menu to 25 entries.
 
 The priority lists determine which entries users can select.
+
+The image menu accepts available, public, nondeprecated standard distribution
+images. It excludes LKE, KPP, and product images and sorts OS versions numerically.
+If the default image is unavailable, the user must select another OS before creation.
+`get_images` fetches every API page with a 30-second timeout per request.
 
 ## Conventions
 

@@ -27,9 +27,21 @@ class AkamaiCloudAPI:
 
     def get_images(self) -> List[Dict[str, Any]]:
         """Return the available operating-system images."""
-        response = requests.get(f"{self.BASE_URL}/images", headers=self.headers)
-        response.raise_for_status()
-        return response.json().get("data", [])
+        images = []
+        page = 1
+        while True:
+            response = requests.get(
+                f"{self.BASE_URL}/images",
+                headers=self.headers,
+                params={"page": page, "page_size": 500},
+                timeout=30,
+            )
+            response.raise_for_status()
+            result = response.json()
+            images.extend(result.get("data", []))
+            if page >= result.get("pages", 1):
+                return images
+            page += 1
 
     def get_instance_types(self) -> List[Dict[str, Any]]:
         """Return the available instance types."""
@@ -51,7 +63,7 @@ class AkamaiCloudAPI:
         Args:
             label: This value is the unique instance label.
             region: This value is the region ID, for example, 'us-east'.
-            image: This value is the image ID, for example, 'linode/ubuntu20.04'.
+            image: This value is the image ID, for example, 'linode/ubuntu26.04'.
             root_pass: This value is the root password.
             type: This value is the instance type. The default is g6-nanode-1.
 
