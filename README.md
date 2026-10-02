@@ -4,7 +4,7 @@ Akamai Cloud Bot manages Akamai Cloud instances through Discord and the Linode A
 
 ## Features
 
-- Creates instances with a selected region, image, and type.
+- Creates instances with a selected region, image, and type, using Linode interfaces.
 - Lists, reboots, imports, and deletes instances.
 - Tracks the instances for each Discord user.
 - Refreshes instance data from Linode.
@@ -37,6 +37,12 @@ Akamai Cloud Bot manages Akamai Cloud instances through Discord and the Linode A
    ```
    uv run akamai_cloud_bot.py
    ```
+
+New instances use a public Linode interface with IPv4 and IPv6 default routes.
+The region menu shows only regions that support Linode interfaces.
+The account must allow Linode interfaces and have a default public-interface
+firewall configured. Creation fails if these requirements are not met.
+Existing instances keep their current interfaces.
 
 ## Commands
 

@@ -145,6 +145,12 @@ The default type is `g6-nanode-1`. Discord limits each selection menu to 25 entr
 
 The priority lists determine which entries users can select.
 
+The region menu requires both the `Linodes` and `Linode Interfaces` capabilities.
+New instances explicitly set `interface_generation` to `linode` and request one
+public interface with IPv4 and IPv6 default routes. The API uses the account's
+default public-interface firewall. The account must allow Linode interfaces and
+have that default firewall configured. Existing instances are not migrated.
+
 The image menu accepts available, public, nondeprecated standard distribution
 images. It excludes LKE, KPP, and product images and sorts OS versions numerically.
 If the default image is unavailable, the user must select another OS before creation.

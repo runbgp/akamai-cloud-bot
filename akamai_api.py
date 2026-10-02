@@ -60,6 +60,9 @@ class AkamaiCloudAPI:
         """
         Create an Akamai Cloud instance.
 
+        Use Linode interfaces with public networking and the account's default
+        public-interface firewall.
+
         Args:
             label: This value is the unique instance label.
             region: This value is the region ID, for example, 'us-east'.
@@ -77,6 +80,13 @@ class AkamaiCloudAPI:
             "root_pass": root_pass,
             "type": type,
             "booted": True,
+            "interface_generation": "linode",
+            "interfaces": [
+                {
+                    "public": {},
+                    "default_route": {"ipv4": True, "ipv6": True},
+                }
+            ],
         }
 
         response = requests.post(

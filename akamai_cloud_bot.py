@@ -496,6 +496,12 @@ class RegionSelect(discord.ui.Select):
     """Select an Akamai Cloud region."""
 
     def __init__(self, regions):
+        regions = [
+            region
+            for region in regions
+            if "Linodes" in region.get("capabilities", [])
+            and "Linode Interfaces" in region.get("capabilities", [])
+        ]
         if not regions:
             super().__init__(
                 placeholder="No regions available",
@@ -731,7 +737,9 @@ class InstanceCreationView(discord.ui.View):
             )
             return
 
-        if not self.region:
+        if self.region == "none" or not any(
+            option.value == self.region for option in self.region_select.options
+        ):
             await interaction.response.send_message(
                 "Please select a region first!", ephemeral=True
             )
