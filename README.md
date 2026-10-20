@@ -87,6 +87,11 @@ The following variables control automatic cleanup:
 ## Dependency review
 
 Dependabot proposes weekly Python updates through its `uv` integration, alongside
-the existing Docker and GitHub Actions updates. Python update PRs carry the
-`dependencies` label and require manual review and merging.
+the existing Docker and GitHub Actions updates. The Python updates include
+transitive dependencies. Minor and patch updates arrive as one grouped PR, and
+each major update has its own PR. Dependabot security updates are enabled.
+Python update PRs carry the `dependencies` label and require manual review and merging.
+
+The Docker workflow builds both image platforms for each pull request without
+pushing them. Do not merge a dependency PR whose build fails.
 Do not start the live cloud bot to verify dependency updates.

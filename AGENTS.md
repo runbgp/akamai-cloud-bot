@@ -17,7 +17,7 @@ Do not edit `pyproject.toml` directly to change dependencies. Commit `uv.lock` w
 
 The container command uses `ghcr.io/runbgp/akamai-cloud-bot:latest`. It mounts `.env` and `akamai_instances.json`.
 
-This repository has no test suite, linter configuration, or continuous integration. Use a test Discord server to make sure that changes work.
+This repository has no test suite or linter configuration. The Docker workflow builds the image for each pull request, and it pushes the image only from `main`. Use a test Discord server to make sure that changes work.
 
 A manual test requires a real Akamai Cloud API token.
 

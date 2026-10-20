@@ -4,7 +4,12 @@ on:
   push:
     branches:
       - main
+  pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   DOCKER_USERNAME: runbgp
@@ -37,6 +42,7 @@ jobs:
           echo "short_sha=$short_sha" >> $GITHUB_OUTPUT
 
       - name: Login to GitHub Container Registry
+        if: github.event_name != 'pull_request'
         uses: docker/login-action@v4
         with:
           registry: ghcr.io
@@ -48,7 +54,7 @@ jobs:
         with:
           context: .
           platforms: ${{ env.DOCKER_TARGET_PLATFORM }}
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: |
             ghcr.io/${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_CONTAINER_NAME }}:sha-${{ steps.prepare.outputs.short_sha }}
             ghcr.io/${{ env.DOCKER_USERNAME }}/${{ env.DOCKER_CONTAINER_NAME }}:latest
