@@ -13,6 +13,12 @@ updates:
         update-types:
           - "minor"
           - "patch"
+      # Security updates open as soon as an advisory lands, outside the
+      # schedule. Put the ones that land together in one PR.
+      uv-security:
+        applies-to: "security-updates"
+        patterns:
+          - "*"
     labels:
       - "dependencies"
     assignees:
